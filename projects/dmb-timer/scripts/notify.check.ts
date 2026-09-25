@@ -5,6 +5,7 @@
 import { strict as assert } from 'node:assert';
 import { DAY, parseLocal } from '../src/lib/time';
 import { dueNotifications, eventsForServer, upcoming, type NotifySchedule } from '../src/lib/notify';
+import { num, plural, W } from '../src/lib/format';
 
 let passed = 0;
 const ok = (name: string, cond: boolean) => {
@@ -119,6 +120,31 @@ const sch: NotifySchedule = {
   const list = eventsForServer(sch, mid);
   ok('прошлое отброшено', list.every((n) => n.ts > mid));
   ok('календарь стал короче', list.length < eventsForServer(sch, s).length);
+}
+
+// ── 12. Остаток в уведомлениях — целые дни, ровно как на главном экране ──
+{
+  const at = s + 30 * DAY; // момент дробный: часы до дембеля не нулевые
+  const list = dueNotifications(sch, at - DAY, at);
+  const n = list.find((x) => x.key === 'days:30')!;
+  ok('событие на 30-й день найдено', Boolean(n));
+  const remaining = e - n.ts;
+  const fullDays = Math.floor(remaining / DAY);
+  const ceilDays = Math.ceil(remaining / DAY);
+  ok('случай дробный (floor ≠ ceil)', fullDays !== ceilDays);
+  ok('в тексте целые дни (floor)', n.body.includes(`${num(fullDays)} ${plural(fullDays, W.day)}`));
+  ok('округления вверх нет', !n.body.includes(`${num(ceilDays)} ${plural(ceilDays, W.day)}`));
+  ok('часов в тексте нет', !n.body.includes(' ч '));
+  console.log(`     «60 дней и часы» кейс: остаток ${remaining / DAY}. дней -> в уведомлении ${fullDays} (было бы ${ceilDays})`);
+}
+
+// ── 13. Для медалей остаток тоже целыми днями ──
+{
+  const list = dueNotifications(sch, e - 31 * DAY, e - 29 * DAY);
+  const n = list.find((x) => x.key === 'ach:l30')!;
+  ok('медаль «Месяц до дома» найдена', Boolean(n));
+  ok('в медали тоже целые дни', !/ \d+,\d+ дней/.test(n.body) && n.body.includes('30 дней'));
+  ok('в медали нет часов', !n.body.includes(' ч '));
 }
 
 console.log(`\n✓ все ${passed} проверок логики пройдены`);

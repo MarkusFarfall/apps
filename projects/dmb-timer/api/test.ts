@@ -28,7 +28,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!sub) return res.status(404).json({ error: 'подписка не найдена' });
 
   const endTs = new Date(sub.profile?.end ?? '').getTime();
-  const days = Number.isFinite(endTs) ? Math.max(0, Math.ceil((endTs - Date.now()) / 86400000)) : null;
+  // целые дни, как в приложении: часы отбрасываются
+  const days = Number.isFinite(endTs) ? Math.max(0, Math.floor((endTs - Date.now()) / 86400000)) : null;
 
   const result = await sendPush(sub, {
     title: '✅ Проверка связи',

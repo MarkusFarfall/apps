@@ -84,10 +84,14 @@ export function dueNotifications(sch: NotifySchedule, from: number, to: number):
   const out: DueNotification[] = [];
   const who = sch.name?.trim() || 'Боец';
 
-  /** текст на конкретный момент времени */
+  /**
+   * Текст на конкретный момент времени.
+   * Остаток — только полные сутки: часы отбрасываются, как на главном экране
+   * (там дни и часы показываются отдельно: «60 дней 07:12:44»).
+   */
   const state = (ts: number) => {
     const c = calc(s0, e0, ts);
-    const daysLeft = Math.max(0, Math.ceil((e0 - ts) / DAY));
+    const daysLeft = Math.max(0, Math.floor((e0 - ts) / DAY));
     return {
       pct: (c.pct * 100).toFixed(2),
       leftTxt: `${num(daysLeft)} ${plural(daysLeft, W.day)}`,
