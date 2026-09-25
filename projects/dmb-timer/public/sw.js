@@ -1,5 +1,6 @@
-const CACHE = 'dmb-timer-v1';
-const CORE = ['./', './index.html', './manifest.webmanifest', './icon.svg'];
+/* ДМБ Таймер — service worker: офлайн-кэш + приём push-уведомлений */
+const CACHE = 'dmb-timer-v2';
+const CORE = ['./', './index.html', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
@@ -18,6 +19,12 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
+
+  const url = new URL(req.url);
+  // API не кэшируем: уведомления и подписки всегда должны идти в сеть
+  if (url.origin === self.location.origin && url.pathname.startsWith('/api/')) return;
+  if (url.origin !== self.location.origin) return;
+
   e.respondWith(
     (async () => {
       try {
@@ -35,6 +42,56 @@ self.addEventListener('fetch', (e) => {
         }
         return Response.error();
       }
+    })()
+  );
+});
+
+/* ─────────── push-уведомления ─────────── */
+
+self.addEventListener('push', (e) => {
+  let data = {};
+  try {
+    data = e.data ? e.data.json() : {};
+  } catch {
+    try {
+      data = { title: 'ДМБ Таймер', body: e.data ? e.data.text() : '' };
+    } catch {
+      data = {};
+    }
+  }
+  // поддержка обоих форматов: {…} и { notification: {…} }
+  const n = data.notification ? { ...data, ...data.notification } : data;
+  const title = n.title || 'ДМБ Таймер';
+  const options = {
+    body: n.body || '',
+    icon: n.icon || './icon-192.png',
+    badge: n.badge || './badge-72.png',
+    tag: n.tag || 'dmb',
+    renotify: Boolean(n.tag),
+    vibrate: [16, 80, 16],
+    lang: 'ru',
+    data: { url: n.url || './' },
+  };
+  e.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const target = (e.notification.data && e.notification.data.url) || './';
+  e.waitUntil(
+    (async () => {
+      const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      for (const client of all) {
+        if ('focus' in client) {
+          try {
+            await client.focus();
+            return;
+          } catch {
+            /* продолжаем поиск */
+          }
+        }
+      }
+      if (self.clients.openWindow) await self.clients.openWindow(target);
     })()
   );
 });

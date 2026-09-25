@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
-import { ChevronRight, RefreshCw, Sparkles, Repeat } from 'lucide-react';
+import { BellRing, ChevronRight, RefreshCw, Sparkles, Repeat } from 'lucide-react';
 import type { Ctx, Prefs } from '../lib/types';
 import { calc, split, monthsBetween, DAY, HOUR, MIN, WEEK, startOfDay } from '../lib/time';
 import { pad, plural, W, num, fmtDate, fmtDur } from '../lib/format';
 import { rankOf, LABELS, routineNow, achievementsFor, QUOTES } from '../lib/data';
 import { useRafNow, buzz } from '../lib/hooks';
+import { pushSupported } from '../lib/push';
 import { Card, ProgressRing, Pogon, SectionTitle } from './ui';
 
 function HeroRing({ ctx, showMs }: { ctx: Ctx; showMs: boolean }) {
@@ -291,7 +292,36 @@ function DoneCard({ ctx }: { ctx: Ctx }) {
   );
 }
 
-export function Home({ ctx, prefs, setPrefs, openMedals }: { ctx: Ctx; prefs: Prefs; setPrefs: (p: Prefs) => void; openMedals: () => void }) {
+function NotifyNudge({ onOpen }: { onOpen: () => void }) {
+  return (
+    <Card onClick={onOpen} delay={360}>
+      <div className="flex items-center gap-3">
+        <div className="bg-grad grid h-11 w-11 shrink-0 place-items-center rounded-2xl text-black">
+          <BellRing size={20} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="font-bold">Включить уведомления</div>
+          <div className="text-xs text-white/50">Медали, экватор и сводка каждые 10 дней — даже когда приложение закрыто</div>
+        </div>
+        <ChevronRight className="text-white/30" />
+      </div>
+    </Card>
+  );
+}
+
+export function Home({
+  ctx,
+  prefs,
+  setPrefs,
+  openMedals,
+  onOpenSettings,
+}: {
+  ctx: Ctx;
+  prefs: Prefs;
+  setPrefs: (p: Prefs) => void;
+  openMedals: () => void;
+  onOpenSettings: () => void;
+}) {
   const c = calc(ctx.s, ctx.e, ctx.now);
   return (
     <div className="space-y-4">
@@ -310,6 +340,7 @@ export function Home({ ctx, prefs, setPrefs, openMedals }: { ctx: Ctx; prefs: Pr
         </>
       )}
       <QuoteCard />
+      {pushSupported() && !prefs.push && <NotifyNudge onOpen={onOpenSettings} />}
     </div>
   );
 }

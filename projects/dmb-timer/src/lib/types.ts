@@ -12,6 +12,12 @@ export interface Prefs {
   showMs: boolean;
   unitMode: number;
   haptics: boolean;
+  /** push-уведомления включены пользователем */
+  push: boolean;
+  /** присылать достижения и круглые отметки */
+  pushAch: boolean;
+  /** напоминание каждые N дней службы; 0 — выключено */
+  pushDays: number;
 }
 
 export interface Ctx {

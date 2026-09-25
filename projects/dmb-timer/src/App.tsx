@@ -3,6 +3,8 @@ import confetti from 'canvas-confetti';
 import { Timer, BarChart3, CalendarDays, Scissors, Medal, Settings as Gear, Share2, MonitorPlay } from 'lucide-react';
 import type { Ctx, Prefs, Profile, Tab } from './lib/types';
 import { useNow, useStored, setHaptics, buzz } from './lib/hooks';
+import { scheduleFrom } from './lib/notify';
+import { pushSupported, showLocalNotification, syncSchedule, TZ_NAME } from './lib/push';
 import { parseLocal, calc } from './lib/time';
 import { achievementsFor, LABELS, rankOf, THEMES } from './lib/data';
 import { Onboarding } from './components/Onboarding';
@@ -24,7 +26,7 @@ const TABS: { id: Tab; label: string; icon: typeof Timer }[] = [
   { id: 'medals', label: 'Медали', icon: Medal },
 ];
 
-const DEFAULT_PREFS: Prefs = { showMs: true, unitMode: 0, haptics: true };
+const DEFAULT_PREFS: Prefs = { showMs: true, unitMode: 0, haptics: true, push: false, pushAch: true, pushDays: 10 };
 
 function fire() {
   const cs = getComputedStyle(document.documentElement);
@@ -84,6 +86,7 @@ export default function App() {
       setToast({ icon: m.icon, title: m.title });
       buzz([20, 60, 20, 60, 40]);
       fire();
+      if (prefs.push) void showLocalNotification({ title: `${m.icon} ${m.title}`, body: m.desc, tag: `ach-${m.id}` });
       setSeen(gotCount);
       const t = setTimeout(() => setToast(null), 4200);
       return () => clearTimeout(t);
@@ -97,6 +100,16 @@ export default function App() {
   useEffect(() => {
     if (done) fire();
   }, [done]);
+
+  // держим расписание уведомлений на сервере в актуальном виде
+  useEffect(() => {
+    if (!prefs.push || !profile || !pushSupported()) return;
+    const t = setTimeout(() => {
+      void syncSchedule(scheduleFrom(profile, prefs, TZ_NAME));
+    }, 900);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefs.push, prefs.pushAch, prefs.pushDays, profile?.start, profile?.end, profile?.name]);
 
   // document title live
   useEffect(() => {
@@ -172,7 +185,9 @@ export default function App() {
       </header>
 
       <main key={tab} className="mx-auto max-w-lg px-4 pb-32">
-        {tab === 'home' && <Home ctx={ctx} prefs={prefs} setPrefs={setPrefs} openMedals={() => setTab('medals')} />}
+        {tab === 'home' && (
+          <Home ctx={ctx} prefs={prefs} setPrefs={setPrefs} openMedals={() => setTab('medals')} onOpenSettings={() => setSettings(true)} />
+        )}
         {tab === 'stats' && <Stats ctx={ctx} />}
         {tab === 'calendar' && <CalendarView ctx={ctx} notes={notes} setNotes={setNotes} />}
         {tab === 'tape' && <Tape ctx={ctx} />}

@@ -4,6 +4,7 @@ import type { Prefs, Profile } from '../lib/types';
 import { parseLocal } from '../lib/time';
 import { DatesFields, ThemePicker, inputCls } from './ProfileForm';
 import { Sheet, Toggle, SectionTitle } from './ui';
+import { NotifySettings } from './NotifySettings';
 import { useInstall } from '../lib/pwa';
 
 export function Settings({
@@ -103,6 +104,8 @@ export function Settings({
           <SectionTitle>Войска / тема</SectionTitle>
           <ThemePicker value={draft.theme} onChange={(t) => update({ ...draft, theme: t })} />
         </div>
+
+        <NotifySettings profile={profile} prefs={prefs} setPrefs={setPrefs} />
 
         <div className="space-y-2">
           <SectionTitle>Отображение</SectionTitle>
