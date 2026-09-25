@@ -4,7 +4,7 @@
  */
 import { strict as assert } from 'node:assert';
 import { DAY, parseLocal } from '../src/lib/time';
-import { dueNotifications, upcoming, type NotifySchedule } from '../src/lib/notify';
+import { dueNotifications, eventsForServer, upcoming, type NotifySchedule } from '../src/lib/notify';
 
 let passed = 0;
 const ok = (name: string, cond: boolean) => {
@@ -99,6 +99,26 @@ const sch: NotifySchedule = {
   const keys = list.map((n) => n.key);
   ok('ключи уникальны', new Set(keys).size === keys.length);
   console.log(`     событий за весь год службы: ${list.length}`);
+}
+
+// ── 10. Календарь для сервера: только будущее, с ключами и текстами ──
+{
+  const list = eventsForServer(sch, s);
+  ok('для сервера есть события', list.length > 0);
+  ok('все в будущем', list.every((n) => n.ts > s));
+  ok('в пределах срока службы', list.every((n) => n.ts <= e));
+  ok('у всех есть ключ, текст и дата', list.every((n) => n.key && n.title && n.body && Number.isFinite(n.ts)));
+  ok('ключи уникальны', new Set(list.map((n) => n.key)).size === list.length);
+  ok('не больше лимита 300', list.length <= 300);
+  console.log(`     календарь для сервера: ${list.length} событий на весь срок`);
+}
+
+// ── 11. События в прошлом не уходят на сервер ──
+{
+  const mid = s + 60 * DAY;
+  const list = eventsForServer(sch, mid);
+  ok('прошлое отброшено', list.every((n) => n.ts > mid));
+  ok('календарь стал короче', list.length < eventsForServer(sch, s).length);
 }
 
 console.log(`\n✓ все ${passed} проверок логики пройдены`);

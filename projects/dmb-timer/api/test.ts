@@ -4,7 +4,7 @@
  * что путь «сервер → push-сервис → устройство» работает.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { configureVapid, loadSub, sendPush } from './_lib';
+import { configureVapid, loadSub, sendPush } from './_lib.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -27,10 +27,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const sub = await loadSub(endpoint);
   if (!sub) return res.status(404).json({ error: 'подписка не найдена' });
 
-  const days = Math.max(0, Math.ceil((new Date(sub.schedule.end).getTime() - Date.now()) / 86400000));
+  const endTs = new Date(sub.profile?.end ?? '').getTime();
+  const days = Number.isFinite(endTs) ? Math.max(0, Math.ceil((endTs - Date.now()) / 86400000)) : null;
+
   const result = await sendPush(sub, {
     title: '✅ Проверка связи',
-    body: `${sub.schedule.name || 'Боец'}, уведомления работают. До дембеля ${days} дн.`,
+    body: `${sub.profile?.name || 'Боец'}, уведомления работают.${days === null ? '' : ` До дембеля ${days} дн.`}`,
     tag: 'dmb-test',
     icon: '/icon-192.png',
     badge: '/badge-72.png',

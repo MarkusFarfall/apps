@@ -136,6 +136,20 @@ export function dueNotifications(sch: NotifySchedule, from: number, to: number):
   return out.sort((a, b) => a.ts - b.ts);
 }
 
+/**
+ * Календарь всех будущих уведомлений целиком — его получает сервер и просто
+ * рассылает по наступлении момента. Так на серверной стороне нет доменной логики:
+ * правила вычисляются один раз здесь и потом везде одинаковы.
+ */
+export function eventsForServer(sch: NotifySchedule, now: number, limit = 300) {
+  const s0 = parseLocal(sch.start);
+  const e0 = parseLocal(sch.end);
+  if (!Number.isFinite(s0) || !Number.isFinite(e0) || e0 <= s0) return [];
+  return dueNotifications(sch, s0 - 1, e0)
+    .filter((n) => n.ts > now)
+    .slice(0, limit);
+}
+
 /** Ближайшие будущие уведомления — для предпросмотра в настройках */
 export function upcoming(sch: NotifySchedule, now: number, count = 3): DueNotification[] {
   const horizon = 400 * DAY;

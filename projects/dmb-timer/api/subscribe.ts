@@ -1,10 +1,10 @@
 /**
  * POST /api/subscribe — сохранить или удалить подписку на уведомления.
- *   { subscription, schedule }        — подписаться / обновить расписание
- *   { action: 'off', endpoint }       — отписаться
+ *   { subscription, profile, events }  — подписаться / обновить календарь событий
+ *   { action: 'off', endpoint }        — отписаться
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { deleteSub, loadSub, parseSubscribeBody, saveSub, type StoredSub } from './_lib';
+import { deleteSub, loadSub, parseSubscribeBody, saveSub, type StoredSub } from './_lib.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -30,7 +30,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const stored: StoredSub = {
     endpoint: parsed.subscription.endpoint,
     keys: parsed.subscription.keys,
-    schedule: parsed.schedule,
+    profile: parsed.profile,
+    events: parsed.events,
     sent: existing?.sent ?? {},
     lastRunAt: existing?.lastRunAt,
     createdAt: existing?.createdAt ?? now,
@@ -38,7 +39,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
 
   await saveSub(stored);
-  return res.status(200).json({ ok: true, createdAt: stored.createdAt, updated: Boolean(existing) });
+  return res.status(200).json({
+    ok: true,
+    createdAt: stored.createdAt,
+    updated: Boolean(existing),
+    events: stored.events.length,
+  });
 }
 
 function safeJSON<T>(text: string): T | null {

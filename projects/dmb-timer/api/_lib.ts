@@ -1,19 +1,34 @@
 /**
- * Общие помощники для серверных функций: хранилище подписок в Vercel Blob
- * и отправка push через web-push.
+ * Общие помощники серверных функций: хранилище подписок в Vercel Blob и отправка push.
  *
- * Файлы с префиксом "_" не публикуются как отдельные маршруты —
- * это внутренний модуль для api/subscribe.ts, api/cron.ts и api/test.ts.
+ * Важно: здесь нет импортов из src/ — функции собираются в ESM, и код вне папки api/
+ * в рантайме недоступен. Календарь уведомлений присылает клиент (см. src/lib/notify.ts),
+ * сервер только хранит его и рассылает по наступлении момента.
  */
 import { createHash } from 'node:crypto';
 import { del, get, list, put } from '@vercel/blob';
 import webpush from 'web-push';
-import type { NotifySchedule } from '../src/lib/notify';
+
+export interface NotifyEvent {
+  key: string;
+  title: string;
+  body: string;
+  tag: string;
+  ts: number;
+}
+
+export interface StoredProfile {
+  name: string;
+  start: string;
+  end: string;
+  tz: string;
+}
 
 export interface StoredSub {
   endpoint: string;
   keys: { p256dh: string; auth: string };
-  schedule: NotifySchedule;
+  profile: StoredProfile;
+  events: NotifyEvent[];
   /** ключ уведомления -> время отправки (защита от дублей) */
   sent: Record<string, number>;
   lastRunAt?: number;
@@ -23,6 +38,7 @@ export interface StoredSub {
 
 const PREFIX = 'subs/';
 const MAX_NAME = 60;
+const MAX_EVENTS = 300;
 const MAX_SENT_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 
 /** Путь в хранилище: хеш endpoint, чтобы не хранить его в имени файла */
@@ -66,7 +82,7 @@ export async function loadSubs(): Promise<StoredSub[]> {
     try {
       out.push(JSON.parse(await new Response(res.stream).text()) as StoredSub);
     } catch {
-      /* пропускаем битую запись */
+      /* битую запись пропускаем */
     }
   }
   return out;
@@ -110,39 +126,53 @@ export async function sendPush(
 
 /** Разбор и проверка тела запроса подписки */
 export function parseSubscribeBody(body: unknown):
-  | { ok: true; subscription: { endpoint: string; keys: { p256dh: string; auth: string } }; schedule: NotifySchedule }
+  | { ok: true; subscription: { endpoint: string; keys: { p256dh: string; auth: string } }; profile: StoredProfile; events: NotifyEvent[] }
   | { ok: false; error: string } {
   const b = body as {
     subscription?: { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
-    schedule?: {
-      name?: string;
-      start?: string;
-      end?: string;
-      tz?: string;
-      prefs?: { achievements?: boolean; everyNDays?: number };
-    };
+    profile?: { name?: string; start?: string; end?: string; tz?: string };
+    events?: unknown;
   };
+
   const endpoint = b?.subscription?.endpoint;
   const p256dh = b?.subscription?.keys?.p256dh;
   const auth = b?.subscription?.keys?.auth;
   if (typeof endpoint !== 'string' || !endpoint.startsWith('https://')) return { ok: false, error: 'bad endpoint' };
-  if (!p256dh || !auth) return { ok: false, error: 'bad keys' };
+  if (typeof p256dh !== 'string' || typeof auth !== 'string' || !p256dh || !auth) return { ok: false, error: 'bad keys' };
 
-  const sch = b?.schedule;
-  const start = sch?.start;
-  const end = sch?.end;
+  const start = b?.profile?.start;
+  const end = b?.profile?.end;
   if (typeof start !== 'string' || typeof end !== 'string') return { ok: false, error: 'bad dates' };
   const s = new Date(start).getTime();
   const e = new Date(end).getTime();
   if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return { ok: false, error: 'end must be after start' };
 
-  const tz = typeof sch?.tz === 'string' && sch.tz.length < 64 ? sch.tz : 'UTC';
-  const everyNDays = Math.max(0, Math.min(365, Math.floor(Number(sch?.prefs?.everyNDays) || 0)));
-  const name = String(sch?.name ?? '').slice(0, MAX_NAME);
+  if (!Array.isArray(b?.events)) return { ok: false, error: 'bad events' };
+  const events: NotifyEvent[] = [];
+  for (const raw of b.events.slice(0, MAX_EVENTS)) {
+    const ev = raw as Partial<NotifyEvent>;
+    if (
+      typeof ev?.key !== 'string' ||
+      typeof ev?.title !== 'string' ||
+      typeof ev?.body !== 'string' ||
+      typeof ev?.tag !== 'string' ||
+      typeof ev?.ts !== 'number' ||
+      !Number.isFinite(ev.ts)
+    ) {
+      continue;
+    }
+    events.push({
+      key: ev.key.slice(0, 80),
+      title: ev.title.slice(0, 120),
+      body: ev.body.slice(0, 300),
+      tag: ev.tag.slice(0, 80),
+      ts: ev.ts,
+    });
+  }
+  if (events.length === 0) return { ok: false, error: 'no events' };
 
-  return {
-    ok: true,
-    subscription: { endpoint, keys: { p256dh, auth } },
-    schedule: { name, start, end, tz, prefs: { achievements: sch?.prefs?.achievements !== false, everyNDays } },
-  };
+  const tz = typeof b?.profile?.tz === 'string' && b.profile.tz.length < 64 ? b.profile.tz : 'UTC';
+  const name = String(b?.profile?.name ?? '').slice(0, MAX_NAME);
+
+  return { ok: true, subscription: { endpoint, keys: { p256dh, auth } }, profile: { name, start, end, tz }, events };
 }

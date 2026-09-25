@@ -5,7 +5,7 @@
  * Публичный VAPID-ключ не секрет — он по определению уходит в браузер.
  * Приватный ключ лежит только в переменных окружения Vercel.
  */
-import type { NotifySchedule } from './notify';
+import { eventsForServer, type NotifySchedule } from './notify';
 
 export const VAPID_PUBLIC_KEY =
   import.meta.env.VITE_VAPID_PUBLIC_KEY ||
@@ -64,7 +64,12 @@ async function postJSON(path: string, body: unknown): Promise<Response> {
 }
 
 async function sendSchedule(sub: PushSubscription, schedule: NotifySchedule) {
-  const res = await postJSON('/api/subscribe', { subscription: sub.toJSON(), schedule });
+  // сервер получает готовый календарь событий: никакой доменной логики на его стороне
+  const res = await postJSON('/api/subscribe', {
+    subscription: sub.toJSON(),
+    profile: { name: schedule.name, start: schedule.start, end: schedule.end, tz: schedule.tz },
+    events: eventsForServer(schedule, Date.now()),
+  });
   if (!res.ok) throw new Error(`subscribe: HTTP ${res.status}`);
 }
 

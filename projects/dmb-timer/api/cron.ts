@@ -3,17 +3,17 @@
  *
  * Запускается Vercel Cron (см. vercel.json) и защищён заголовком
  * Authorization: Bearer <CRON_SECRET>, который Vercel подставляет сам.
- * Тот же endpoint можно дёргать внешним планировщиком (например, раз в час),
- * чтобы уведомления приходили точнее: обработка идемпотентна — каждое событие
- * отправляется один раз, состояние хранится в подписке.
+ * Тот же endpoint можно дёргать внешним планировщиком (раз в 15–60 минут),
+ * чтобы уведомления приходили точнее: обработка идемпотентна, каждое событие
+ * уходит один раз — отправленное помечается в подписке.
+ *
+ * Доменных вычислений здесь нет: календарь событий прислал клиент,
+ * планировщик только рассылает наступившее.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { DAY } from '../src/lib/time';
-import { dueNotifications } from '../src/lib/notify';
-import { configureVapid, deleteSub, loadSubs, pruneSent, saveSub, sendPush } from './_lib';
+import { configureVapid, deleteSub, loadSubs, pruneSent, saveSub, sendPush } from './_lib.js';
 
 const MAX_PER_RUN = 3;
-const MAX_FIRST_LOOKBACK = 2 * DAY;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const secret = process.env.CRON_SECRET;
@@ -33,21 +33,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let sent = 0;
   let gone = 0;
   let failed = 0;
-  let skipped = 0;
   const details: string[] = [];
 
   for (const sub of subs) {
-    const from = sub.lastRunAt ?? now - MAX_FIRST_LOOKBACK;
-    const due = dueNotifications(sub.schedule, from, now).filter((n) => !sub.sent?.[n.key]);
-
-    if (due.length === 0) {
-      skipped++;
-      sub.lastRunAt = now;
-      sub.sent = sub.sent ?? {};
-      pruneSent(sub, now);
-      await saveSub(sub);
-      continue;
-    }
+    const from = sub.lastRunAt ?? now - 24 * 60 * 60 * 1000;
+    sub.sent = sub.sent ?? {};
+    const due = (sub.events ?? [])
+      .filter((e) => e.ts > from && e.ts <= now && !sub.sent[e.key])
+      .sort((a, b) => a.ts - b.ts);
 
     let dead = false;
     for (const n of due.slice(0, MAX_PER_RUN)) {
@@ -64,7 +57,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         sent++;
         details.push(`${n.key} → ok`);
       } else if (result === 'gone') {
-        details.push(`${n.key} → gone (подписка удалена)`);
+        details.push(`${n.key} → gone`);
         await deleteSub(sub.endpoint);
         dead = true;
         gone++;
@@ -76,7 +69,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (!dead) {
-      sub.sent = sub.sent ?? {};
       pruneSent(sub, now);
       sub.lastRunAt = now;
       await saveSub(sub);
@@ -88,7 +80,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     at: new Date(now).toISOString(),
     subscriptions: subs.length,
     sent,
-    skipped,
     gone,
     failed,
     details: details.slice(0, 20),
