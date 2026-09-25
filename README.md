@@ -7,7 +7,7 @@
 
 | Проект | Что это | Стек | Живая версия |
 |---|---|---|---|
-| [**ДМБ Таймер**](projects/dmb-timer) | Дембельский таймер до секунды: стата, календарь, «сантиметр», медали. PWA, работает офлайн | Vite 7 · React 19 · TypeScript · Tailwind 4 | https://dmb-timer-markusfarfall.vercel.app |
+| [**ДМБ Таймер**](projects/dmb-timer) | Дембельский таймер до секунды: стата, календарь, «сантиметр», медали. PWA, работает офлайн | Vite 7 · React 19 · TypeScript · Tailwind 4 | https://dmb-timer.vercel.app |
 | *Сайт-каталог* (`site/`) | Страница со списком проектов — открывается на корневом домене | HTML + CSS, без сборки | https://apps-markusfarfall.vercel.app |
 
 ## Структура
