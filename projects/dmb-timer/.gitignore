@@ -1,0 +1,22 @@
+# зависимости и сборка
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# логи
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Vercel
+.vercel
+.env*
+!.env.example
+
+# редакторы
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.tsbuildinfo
