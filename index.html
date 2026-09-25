@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>apps — мои проекты</title>
+<meta name="description" content="Каталог проектов: ДМБ Таймер и другие.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>▲</text></svg>">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  :root {
+    --bg: #08090b;
+    --card: rgba(255,255,255,.035);
+    --card-hover: rgba(255,255,255,.06);
+    --line: rgba(255,255,255,.09);
+    --fg: #f2f3f5;
+    --muted: #9ba1ab;
+    --dim: #6f747d;
+    --accent: #d8e893;
+  }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--fg);
+    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: 56px 24px 72px;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -30% -10% auto;
+    height: 110vh;
+    background:
+      radial-gradient(42% 42% at 22% 12%, rgba(120,160,255,.14), transparent 70%),
+      radial-gradient(38% 38% at 78% 4%, rgba(190,120,255,.11), transparent 70%);
+    pointer-events: none;
+    z-index: -1;
+  }
+  .wrap { width: min(940px, 100%); margin: 0 auto; }
+
+  header { margin-bottom: 40px; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 5px 12px; margin-bottom: 20px;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: #3ddc84; box-shadow: 0 0 0 4px rgba(61,220,132,.15); }
+  h1 { margin: 0 0 10px; font-size: clamp(30px, 6vw, 44px); line-height: 1.1; letter-spacing: -.025em; }
+  header p { margin: 0; color: var(--muted); max-width: 60ch; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    margin-top: 32px;
+  }
+  .card {
+    display: flex; flex-direction: column;
+    text-decoration: none; color: inherit;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 22px;
+    transition: background .18s ease, transform .18s ease, border-color .18s ease;
+  }
+  a.card:hover { background: var(--card-hover); transform: translateY(-3px); border-color: rgba(255,255,255,.18); }
+  .card .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .icon {
+    width: 44px; height: 44px; flex: none;
+    display: grid; place-items: center;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(181,201,106,.22), rgba(224,191,110,.14));
+    border: 1px solid var(--line);
+    font-size: 21px;
+  }
+  .kind {
+    font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--dim); border: 1px solid var(--line); border-radius: 999px;
+    padding: 3px 9px; white-space: nowrap;
+  }
+  .card h2 { margin: 0 0 8px; font-size: 19px; letter-spacing: -.01em; }
+  .card p { margin: 0 0 16px; color: var(--muted); font-size: 14.5px; }
+  .card p.tight { margin-bottom: 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 14px; }
+  .chip {
+    font-size: 12px; color: var(--muted);
+    background: rgba(255,255,255,.045);
+    border: 1px solid var(--line);
+    border-radius: 7px; padding: 3px 8px;
+  }
+  .go {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13.5px; font-weight: 500; color: var(--accent);
+    margin-top: 14px;
+  }
+  .card.soon { border-style: dashed; background: transparent; align-items: center; justify-content: center; text-align: center; min-height: 190px; }
+  .card.soon h2 { font-size: 16px; color: var(--muted); font-weight: 500; }
+  .card.soon p { font-size: 13.5px; color: var(--dim); margin: 0; }
+
+  section.about { margin-top: 52px; padding-top: 26px; border-top: 1px solid var(--line); }
+  section.about h3 { margin: 0 0 12px; font-size: 15px; color: var(--muted); font-weight: 600; }
+  section.about ul { margin: 0; padding-left: 20px; color: var(--muted); font-size: 14.5px; }
+  section.about li { margin-bottom: 6px; }
+  a.link { color: var(--fg); text-decoration: none; border-bottom: 1px solid rgba(255,255,255,.25); }
+  a.link:hover { border-color: var(--accent); color: var(--accent); }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .88em; background: rgba(255,255,255,.06);
+    border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px;
+  }
+  footer { margin-top: 40px; font-size: 12.5px; color: var(--dim); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow"><span class="dot"></span> Vercel · автодеплой из GitHub</div>
+    <h1>Мои проекты</h1>
+    <p>Каталог приложений из репозитория <code>MarkusFarfall/apps</code>. Каждый проект — отдельная папка, отдельная сборка и свой адрес.</p>
+  </header>
+
+  <div class="grid">
+
+    <a class="card" href="https://dmb-timer-markusfarfall.vercel.app">
+      <div class="top">
+        <div class="icon">🎖️</div>
+        <div class="kind">PWA</div>
+      </div>
+      <h2>ДМБ Таймер</h2>
+      <p>Дембельский счётчик с точностью до секунды: стата, календарь, «сантиметр», медали. Устанавливается на телефон и работает офлайн.</p>
+      <p class="tight"></p>
+      <div class="chips">
+        <span class="chip">React 19</span>
+        <span class="chip">Vite 7</span>
+        <span class="chip">TypeScript</span>
+        <span class="chip">Tailwind 4</span>
+      </div>
+      <span class="go">Открыть ↗</span>
+    </a>
+
+    <a class="card" href="https://github.com/MarkusFarfall/apps">
+      <div class="top">
+        <div class="icon">📦</div>
+        <div class="kind">Репозиторий</div>
+      </div>
+      <h2>MarkusFarfall/apps</h2>
+      <p>Монорепозиторий: исходники всех проектов и этот каталог. Пуши в <code>main</code> обновляют прод автоматически.</p>
+      <div class="chips">
+        <span class="chip">монорепо</span>
+        <span class="chip">projects/&lt;имя&gt;</span>
+        <span class="chip">CI: Vercel</span>
+      </div>
+      <span class="go">Перейти в GitHub ↗</span>
+    </a>
+
+    <div class="card soon">
+      <h2>Следующий проект</h2>
+      <p>появится здесь после <code>push</code> в <code>projects/</code></p>
+    </div>
+
+  </div>
+
+  <section class="about">
+    <h3>Как это устроено</h3>
+    <ul>
+      <li>Исходники проекта лежат в папке <code>projects/&lt;имя&gt;</code> этого репозитория.</li>
+      <li>На Vercel каждому проекту соответствует отдельная запись с <b>Root Directory</b> на его папку — сборки не мешают друг другу.</li>
+      <li>Ветка <code>main</code> деплоится в прод, остальные ветки дают preview-ссылки.</li>
+      <li>Этот каталог — статический <code>site/index.html</code>, он же корневой домен.</li>
+    </ul>
+  </section>
+
+  <footer>Репозиторий: <a class="link" href="https://github.com/MarkusFarfall/apps">github.com/MarkusFarfall/apps</a></footer>
+
+</div>
+</body>
+</html>
