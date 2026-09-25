@@ -1,0 +1,73 @@
+# ---- Секреты и локальные настройки ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials.json
+
+# ---- ОС ----
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+desktop.ini
+*.lnk
+
+# ---- Редакторы и IDE ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.code-workspace
+
+# ---- Node.js ----
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.next/
+.nuxt/
+.output/
+.vite/
+dist/
+build/
+coverage/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.eggs/
+htmlcov/
+.ipynb_checkpoints/
+
+# ---- Java / Kotlin / Go / Rust ----
+target/
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+.gradle/
+bin/
+vendor/
+
+# ---- Прочее ----
+*.log
+*.tmp
+.cache/
+tmp/
+
+# ---- Служебные данные CLI в этом окружении ----
+.local/
