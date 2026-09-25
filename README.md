@@ -1,4 +1,4 @@
-# my-first-repo
+# apps
 
 Приватный репозиторий-заготовка. Здесь пока только README и `.gitignore` — добавляйте сюда что угодно.
 
@@ -6,8 +6,8 @@
 
 1. Склонировать репозиторий:
    ```bash
-   git clone https://github.com/<ваш-логин>/my-first-repo.git
-   cd my-first-repo
+   git clone https://github.com/<ваш-логин>/apps.git
+   cd apps
    ```
 2. Создать первую ветку под задачу:
    ```bash
