@@ -3,7 +3,7 @@ import { X, Maximize } from 'lucide-react';
 import type { Ctx } from '../lib/types';
 import { calc, split, HOUR } from '../lib/time';
 import { pad, plural, W, num } from '../lib/format';
-import { labels } from '../lib/data';
+import { LABELS } from '../lib/data';
 import { useRafNow } from '../lib/hooks';
 
 type WakeLockSentinelLike = { release: () => Promise<void> };
@@ -13,7 +13,7 @@ export function Board({ ctx, onClose }: { ctx: Ctx; onClose: () => void }) {
   const [style, setStyle] = useState(0);
   const c = calc(ctx.s, ctx.e, now);
   const t = split(c.notStarted ? ctx.s - now : c.left);
-  const L = labels(ctx.profile.mode);
+  const L = LABELS;
 
   useEffect(() => {
     let lock: WakeLockSentinelLike | null = null;

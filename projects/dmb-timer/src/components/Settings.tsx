@@ -5,7 +5,6 @@ import { parseLocal } from '../lib/time';
 import { DatesFields, ThemePicker, inputCls } from './ProfileForm';
 import { Sheet, Toggle, SectionTitle } from './ui';
 import { useInstall } from '../lib/pwa';
-import { cn } from '../utils/cn';
 
 export function Settings({
   open,
@@ -92,22 +91,6 @@ export function Settings({
 
         <div>
           <SectionTitle>Профиль</SectionTitle>
-          <div className="mb-3 grid grid-cols-2 gap-2">
-            {(
-              [
-                ['serve', '🪖 Я служу'],
-                ['wait', '💌 Я жду'],
-              ] as const
-            ).map(([m, l]) => (
-              <button
-                key={m}
-                onClick={() => update({ ...draft, mode: m })}
-                className={cn('rounded-2xl py-3 text-sm font-bold', draft.mode === m ? 'bg-accent text-black' : 'bg-white/5')}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
           <input value={draft.name} onChange={(e) => update({ ...draft, name: e.target.value })} placeholder="Имя / позывной" className={inputCls} maxLength={30} />
         </div>
 

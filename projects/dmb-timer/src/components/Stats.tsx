@@ -3,14 +3,14 @@ import { CheckCircle2, Clock } from 'lucide-react';
 import type { Ctx } from '../lib/types';
 import { calc, countDaily, countWeekday, monthsBetween, DAY, HOUR, MIN, WEEK, SEC, parseLocal, toLocalInput } from '../lib/time';
 import { num, fmtDate, fmtDur, plural, W } from '../lib/format';
-import { labels, rankOf } from '../lib/data';
+import { LABELS, rankOf } from '../lib/data';
 import { Card, SectionTitle } from './ui';
 import { inputCls } from './ProfileForm';
 import { cn } from '../utils/cn';
 
 function UnitsTable({ ctx }: { ctx: Ctx }) {
   const c = calc(ctx.s, ctx.e, ctx.now);
-  const L = labels(ctx.profile.mode);
+  const L = LABELS;
   const mp = monthsBetween(ctx.s, Math.min(ctx.now, ctx.e));
   const ml = monthsBetween(Math.max(ctx.now, ctx.s), ctx.e);
   const rows = [
@@ -52,37 +52,27 @@ function FunStats({ ctx }: { ctx: Ctx }) {
     const lunches = countDaily(from, to, 13, 30);
     const dinners = countDaily(from, to, 19);
     const eaten = countDaily(pFrom, pTo, 7) + countDaily(pFrom, pTo, 13, 30) + countDaily(pFrom, pTo, 19);
-    return ctx.profile.mode === 'serve'
-      ? [
-          { i: '🍳', t: 'Завтраков', v: breakfasts },
-          { i: '🍲', t: 'Обедов', v: lunches },
-          { i: '🍽️', t: 'Ужинов', v: dinners },
-          { i: '⏰', t: 'Подъёмов', v: countDaily(from, to, 6) },
-          { i: '🌙', t: 'Отбоев', v: countDaily(from, to, 22) },
-          { i: '🧹', t: 'ПХД (суббот)', v: countWeekday(from, to, 6) },
-          { i: '😴', t: 'Воскресений', v: countWeekday(from, to, 0) },
-          { i: '😩', t: 'Понедельников', v: countWeekday(from, to, 1) },
-          { i: '🪒', t: 'Бритьё', v: Math.ceil(left / DAY) },
-          { i: '🪡', t: 'Подшив воротничка', v: Math.ceil(left / DAY) },
-          { i: '🥣', t: 'Уже съедено в столовой', v: eaten, passed: true },
-          { i: '❤️', t: 'Ударов сердца', v: (left / MIN) * 72 },
-        ]
-      : [
-          { i: '🌅', t: 'Утр без него', v: countDaily(from, to, 8) },
-          { i: '🌙', t: 'Вечеров', v: countDaily(from, to, 21) },
-          { i: '📞', t: 'Воскресных звонков', v: countWeekday(from, to, 0) },
-          { i: '💌', t: 'Писем (если раз в неделю)', v: Math.ceil(left / WEEK) },
-          { i: '🗓️', t: 'Выходных', v: countWeekday(from, to, 6) + countWeekday(from, to, 0) },
-          { i: '😩', t: 'Понедельников', v: countWeekday(from, to, 1) },
-          { i: '💪', t: 'Уже пройдено дней', v: (pTo - pFrom) / DAY, passed: true },
-          { i: '❤️', t: 'Ударов сердца', v: (left / MIN) * 72 },
-        ];
+    return [
+        { i: '🍳', t: 'Завтраков', v: breakfasts },
+        { i: '🍲', t: 'Обедов', v: lunches },
+        { i: '🍽️', t: 'Ужинов', v: dinners },
+        { i: '⏰', t: 'Подъёмов', v: countDaily(from, to, 6) },
+        { i: '🌙', t: 'Отбоев', v: countDaily(from, to, 22) },
+        { i: '🧹', t: 'ПХД (суббот)', v: countWeekday(from, to, 6) },
+        { i: '😴', t: 'Воскресений', v: countWeekday(from, to, 0) },
+        { i: '😩', t: 'Понедельников', v: countWeekday(from, to, 1) },
+        { i: '🪒', t: 'Бритьё', v: Math.ceil(left / DAY) },
+        { i: '🪡', t: 'Подшив воротничка', v: Math.ceil(left / DAY) },
+        { i: '🥣', t: 'Уже съедено в столовой', v: eaten, passed: true },
+        { i: '❤️', t: 'Ударов сердца', v: (left / MIN) * 72 },
+      
+    ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [minuteKey, ctx.s, ctx.e, ctx.profile.mode]);
+  }, [minuteKey, ctx.s, ctx.e]);
 
   return (
     <Card delay={60}>
-      <SectionTitle>{ctx.profile.mode === 'serve' ? 'Дембельская арифметика' : 'Арифметика ожидания'}</SectionTitle>
+      <SectionTitle>Дембельская арифметика</SectionTitle>
       <p className="-mt-1 mb-3 text-xs text-white/40">Сколько ещё осталось — с учётом текущего часа</p>
       <div className="grid grid-cols-2 gap-2">
         {data.map((d) => (
@@ -130,7 +120,7 @@ function TimeMachine({ ctx }: { ctx: Ctx }) {
   const ts = parseLocal(v);
   const ok = !isNaN(ts);
   const c = calc(ctx.s, ctx.e, ok ? ts : ctx.now);
-  const L = labels(ctx.profile.mode);
+  const L = LABELS;
   const presets = [
     { l: 'Новый год', ts: new Date(new Date(ctx.now).getFullYear() + 1, 0, 1).getTime() },
     { l: '+1 неделя', ts: ctx.now + WEEK },
@@ -164,7 +154,7 @@ function TimeMachine({ ctx }: { ctx: Ctx }) {
             <div className="text-[10px] font-bold uppercase text-white/40">{plural(c.left / DAY, W.day)} ост.</div>
           </div>
           <div className="rounded-2xl bg-white/5 p-3">
-            <div className="truncate font-display text-sm font-extrabold text-accent">{rankOf(c.pct, ctx.profile.mode).rank.name}</div>
+            <div className="truncate font-display text-sm font-extrabold text-accent">{rankOf(c.pct).rank.name}</div>
             <div className="text-[10px] font-bold uppercase text-white/40">звание</div>
           </div>
         </div>

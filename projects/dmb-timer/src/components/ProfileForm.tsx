@@ -24,7 +24,7 @@ export function DatesFields({ p, set }: { p: Profile; set: (p: Profile) => void 
     <div className="space-y-4">
       <label className="block">
         <span className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-white/50">
-          {p.mode === 'serve' ? 'Дата и время призыва' : 'Когда проводила'}
+          Дата и время призыва
         </span>
         <input
           type="datetime-local"
@@ -64,7 +64,7 @@ export function DatesFields({ p, set }: { p: Profile; set: (p: Profile) => void 
       </div>
       <label className="block">
         <span className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-white/50">
-          {p.mode === 'serve' ? 'Дата и время дембеля' : 'Когда вернётся'}
+          Дата и время дембеля
         </span>
         <input type="datetime-local" value={p.end} onChange={(ev) => set({ ...p, end: ev.target.value })} className={inputCls} />
       </label>

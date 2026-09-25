@@ -1,7 +1,7 @@
 import type { Ctx } from './types';
 import { calc, split } from './time';
 import { plural, W, fmtDate, num } from './format';
-import { rankOf, labels } from './data';
+import { rankOf, LABELS } from './data';
 
 const cssVar = (n: string) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || '#b5c96a';
 
@@ -10,8 +10,8 @@ export async function makeCard(ctx: Ctx): Promise<Blob> {
   const now = Date.now();
   const c = calc(s, e, now);
   const t = split(c.left);
-  const L = labels(profile.mode);
-  const { rank } = rankOf(c.pct, profile.mode);
+  const L = LABELS;
+  const { rank } = rankOf(c.pct);
   const A = cssVar('--accent');
   const B = cssVar('--accent2');
   const BG = cssVar('--bg');
@@ -118,7 +118,7 @@ export async function makeCard(ctx: Ctx): Promise<Blob> {
 export function shareText(ctx: Ctx) {
   const c = calc(ctx.s, ctx.e, Date.now());
   const t = split(c.left);
-  const L = labels(ctx.profile.mode);
+  const L = LABELS;
   if (c.done) return `🏆 ${L.doneTitle} ${L.doneSub}`;
-  return `🪖 ${L.left}: ${t.days} ${plural(t.days, W.day)} ${t.hours} ч ${t.minutes} мин ${L.until}!\n📊 ${L.passed}: ${(c.pct * 100).toFixed(4)}%\n🎖️ Звание: ${rankOf(c.pct, ctx.profile.mode).rank.name}\n#ДМБ #дембель`;
+  return `🪖 ${L.left}: ${t.days} ${plural(t.days, W.day)} ${t.hours} ч ${t.minutes} мин ${L.until}!\n📊 ${L.passed}: ${(c.pct * 100).toFixed(4)}%\n🎖️ Звание: ${rankOf(c.pct).rank.name}\n#ДМБ #дембель`;
 }

@@ -3,15 +3,15 @@ import { ChevronRight, RefreshCw, Sparkles, Repeat } from 'lucide-react';
 import type { Ctx, Prefs } from '../lib/types';
 import { calc, split, monthsBetween, DAY, HOUR, MIN, WEEK, startOfDay } from '../lib/time';
 import { pad, plural, W, num, fmtDate, fmtDur } from '../lib/format';
-import { rankOf, labels, routineNow, achievementsFor, QUOTES_SERVE, QUOTES_WAIT } from '../lib/data';
+import { rankOf, LABELS, routineNow, achievementsFor, QUOTES } from '../lib/data';
 import { useRafNow, buzz } from '../lib/hooks';
 import { Card, ProgressRing, Pogon, SectionTitle } from './ui';
 
 function HeroRing({ ctx, showMs }: { ctx: Ctx; showMs: boolean }) {
   const now = useRafNow(showMs, 30);
-  const { s, e, profile } = ctx;
+  const { s, e } = ctx;
   const c = calc(s, e, now);
-  const L = labels(profile.mode);
+  const L = LABELS;
   const target = c.notStarted ? s - now : c.done ? now - e : c.left;
   const t = split(target);
   return (
@@ -38,7 +38,7 @@ function HeroRing({ ctx, showMs }: { ctx: Ctx; showMs: boolean }) {
 function LivePercent({ ctx }: { ctx: Ctx }) {
   const now = useRafNow(true, 20);
   const c = calc(ctx.s, ctx.e, now);
-  const L = labels(ctx.profile.mode);
+  const L = LABELS;
   const str = (c.pct * 100).toFixed(7);
   const [int, dec] = str.split('.');
   return (
@@ -61,13 +61,13 @@ function LivePercent({ ctx }: { ctx: Ctx }) {
 
 const UNIT_MODES = ['Дни · часы · мин · сек', 'Только часы', 'Только минуты', 'Только секунды', 'Недели и дни', 'Месяцы и дни', 'Сердцебиения ❤️'];
 
-function UnitCounter({ ctx, mode, setMode }: { ctx: Ctx; mode: number; setMode: (n: number) => void }) {
+function UnitCounter({ ctx, unit, setUnit }: { ctx: Ctx; unit: number; setUnit: (n: number) => void }) {
   const now = useRafNow(true, 15);
   const c = calc(ctx.s, ctx.e, now);
   const left = c.notStarted ? ctx.e - ctx.s : c.left;
   const t = split(left);
   let big: { v: string; u: string }[] = [];
-  switch (mode % UNIT_MODES.length) {
+  switch (unit % UNIT_MODES.length) {
     case 0:
       big = [
         { v: String(t.days), u: 'дн' },
@@ -121,14 +121,14 @@ function UnitCounter({ ctx, mode, setMode }: { ctx: Ctx; mode: number; setMode: 
     <Card
       onClick={() => {
         buzz();
-        setMode((mode + 1) % UNIT_MODES.length);
+        setUnit((unit + 1) % UNIT_MODES.length);
       }}
       delay={60}
     >
       <SectionTitle
         right={
           <span className="flex items-center gap-1 text-[11px] font-bold text-accent">
-            <Repeat size={12} /> {UNIT_MODES[mode % UNIT_MODES.length]}
+            <Repeat size={12} /> {UNIT_MODES[unit % UNIT_MODES.length]}
           </span>
         }
       >
@@ -148,7 +148,7 @@ function UnitCounter({ ctx, mode, setMode }: { ctx: Ctx; mode: number; setMode: 
 }
 
 function RankCard({ ctx, pct }: { ctx: Ctx; pct: number }) {
-  const { idx, rank, next, list } = rankOf(pct, ctx.profile.mode);
+  const { idx, rank, next, list } = rankOf(pct);
   const total = ctx.e - ctx.s;
   const segPct = next ? (pct - rank.min) / (next.min - rank.min) : 1;
   const nextAt = next ? ctx.s + total * next.min : 0;
@@ -186,7 +186,7 @@ function RankCard({ ctx, pct }: { ctx: Ctx; pct: number }) {
 }
 
 function TodayCard({ ctx }: { ctx: Ctx }) {
-  const { s, e, now, profile } = ctx;
+  const { s, e, now } = ctx;
   const dayNum = Math.floor((now - s) / DAY) + 1;
   const totalDays = Math.ceil((e - s) / DAY);
   const sod = startOfDay(now);
@@ -202,7 +202,7 @@ function TodayCard({ ctx }: { ctx: Ctx }) {
           <div className="font-display text-3xl font-black">
             День <span className="text-grad">{num(dayNum)}</span>
           </div>
-          <div className="text-sm text-white/50">из {num(totalDays)} {profile.mode === 'serve' ? 'дней службы' : 'дней ожидания'}</div>
+          <div className="text-sm text-white/50">из {num(totalDays)} дней службы</div>
         </div>
         <div className="text-right">
           <div className="font-mono text-2xl font-bold">{Math.floor(todayPct * 100)}%</div>
@@ -217,19 +217,17 @@ function TodayCard({ ctx }: { ctx: Ctx }) {
           </div>
         ))}
       </div>
-      {profile.mode === 'serve' && (
-        <div className="mt-4 flex items-center gap-3 rounded-2xl bg-white/5 p-3">
-          <div className="text-2xl">{r.cur.icon}</div>
-          <div className="min-w-0 flex-1">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-white/40">По распорядку сейчас</div>
-            <div className="truncate font-bold">{r.isSleep ? 'Сон 😴' : r.cur.name}</div>
-          </div>
-          <div className="text-right">
-            <div className="text-[11px] text-white/40">{r.next.icon} {r.next.name}</div>
-            <div className="font-mono text-sm font-bold text-accent">через {fmtDur(r.nextAt - now)}</div>
-          </div>
+      <div className="mt-4 flex items-center gap-3 rounded-2xl bg-white/5 p-3">
+        <div className="text-2xl">{r.cur.icon}</div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-white/40">По распорядку сейчас</div>
+          <div className="truncate font-bold">{r.isSleep ? 'Сон 😴' : r.cur.name}</div>
         </div>
-      )}
+        <div className="text-right">
+          <div className="text-[11px] text-white/40">{r.next.icon} {r.next.name}</div>
+          <div className="font-mono text-sm font-bold text-accent">через {fmtDur(r.nextAt - now)}</div>
+        </div>
+      </div>
     </Card>
   );
 }
@@ -255,8 +253,8 @@ function NextMedal({ ctx, onOpen }: { ctx: Ctx; onOpen: () => void }) {
   );
 }
 
-function QuoteCard({ mode }: { mode: 'serve' | 'wait' }) {
-  const list = mode === 'serve' ? QUOTES_SERVE : QUOTES_WAIT;
+function QuoteCard() {
+  const list = QUOTES;
   const daily = Math.floor(Date.now() / DAY) % list.length;
   const [i, setI] = useState(daily);
   return (
@@ -282,7 +280,7 @@ function QuoteCard({ mode }: { mode: 'serve' | 'wait' }) {
 }
 
 function DoneCard({ ctx }: { ctx: Ctx }) {
-  const L = labels(ctx.profile.mode);
+  const L = LABELS;
   return (
     <Card className="text-center">
       <Sparkles className="mx-auto mb-2 text-accent" size={36} />
@@ -305,13 +303,13 @@ export function Home({ ctx, prefs, setPrefs, openMedals }: { ctx: Ctx; prefs: Pr
         <DoneCard ctx={ctx} />
       ) : (
         <>
-          <UnitCounter ctx={ctx} mode={prefs.unitMode} setMode={(n) => setPrefs({ ...prefs, unitMode: n })} />
+          <UnitCounter ctx={ctx} unit={prefs.unitMode} setUnit={(n) => setPrefs({ ...prefs, unitMode: n })} />
           {!c.notStarted && <RankCard ctx={ctx} pct={c.pct} />}
           {!c.notStarted && <TodayCard ctx={ctx} />}
           <NextMedal ctx={ctx} onOpen={openMedals} />
         </>
       )}
-      <QuoteCard mode={ctx.profile.mode} />
+      <QuoteCard />
     </div>
   );
 }

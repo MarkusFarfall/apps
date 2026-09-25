@@ -4,7 +4,7 @@ import { Timer, BarChart3, CalendarDays, Scissors, Medal, Settings as Gear, Shar
 import type { Ctx, Prefs, Profile, Tab } from './lib/types';
 import { useNow, useStored, setHaptics, buzz } from './lib/hooks';
 import { parseLocal, calc } from './lib/time';
-import { achievementsFor, labels, rankOf, THEMES } from './lib/data';
+import { achievementsFor, LABELS, rankOf, THEMES } from './lib/data';
 import { Onboarding } from './components/Onboarding';
 import { Home } from './components/Home';
 import { Stats } from './components/Stats';
@@ -59,6 +59,14 @@ export default function App() {
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t?.bg ?? '#0d100a');
   }, [theme]);
 
+  // миграция со старых версий: тогда в профиле хранился выбор «я служу / я жду»
+  useEffect(() => {
+    if (!profile) return;
+    const legacy = profile as Profile & { mode?: string };
+    if (legacy.mode === undefined) return;
+    setProfile({ name: legacy.name, start: legacy.start, end: legacy.end, theme: legacy.theme });
+  }, [profile, setProfile]);
+
   const s = profile ? parseLocal(profile.start) : 0;
   const e = profile ? parseLocal(profile.end) : 0;
   const medals = useMemo(() => (profile ? achievementsFor(s, e) : []), [profile, s, e]);
@@ -111,9 +119,9 @@ export default function App() {
   }
 
   const ctx: Ctx = { profile, s, e, now };
-  const L = labels(profile.mode);
+  const L = LABELS;
   const c = calc(s, e, now);
-  const { rank } = rankOf(c.pct, profile.mode);
+  const { rank } = rankOf(c.pct);
   const hour = new Date(now).getHours();
   const greet = hour < 6 ? 'Доброй ночи' : hour < 12 ? 'Доброе утро' : hour < 18 ? 'Добрый день' : 'Добрый вечер';
 
@@ -124,8 +132,7 @@ export default function App() {
           <div className="bg-grad grid h-10 w-10 shrink-0 place-items-center rounded-xl font-display text-[11px] font-black text-black shadow-lg">ДМБ</div>
           <div className="min-w-0 flex-1">
             <div className="truncate text-[11px] font-semibold text-white/45">
-              {greet}
-              {profile.mode === 'serve' ? ',' : ' · ждём'}
+              {greet},
             </div>
             <div className="truncate font-display text-sm font-bold">
               {profile.name || L.who} <span className="text-accent">· {rank.name}</span>

@@ -1,4 +1,3 @@
-export type Mode = 'serve' | 'wait';
 export type ThemeId = 'khaki' | 'vdv' | 'navy' | 'border' | 'night' | 'vks';
 export type Tab = 'home' | 'stats' | 'calendar' | 'tape' | 'medals';
 
@@ -6,7 +5,6 @@ export interface Profile {
   name: string;
   start: string; // YYYY-MM-DDTHH:mm (local)
   end: string;
-  mode: Mode;
   theme: ThemeId;
 }
 

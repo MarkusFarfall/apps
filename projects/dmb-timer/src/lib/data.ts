@@ -1,4 +1,4 @@
-import type { Mode, ThemeId } from './types';
+import type { ThemeId } from './types';
 import { DAY, HOUR, SEC, WEEK, addMonths } from './time';
 
 export interface Rank {
@@ -7,7 +7,7 @@ export interface Rank {
   desc: string;
 }
 
-export const RANKS_SERVE: Rank[] = [
+export const RANKS: Rank[] = [
   { min: 0, name: 'Запах', desc: 'Только прибыл. Ещё пахнешь домашними пирожками.' },
   { min: 0.03, name: 'Дух', desc: 'Присягу принял, портянки мотать научился.' },
   { min: 0.25, name: 'Слон', desc: 'Четверть позади. Уже знаешь, где раздают тушёнку.' },
@@ -16,19 +16,8 @@ export const RANKS_SERVE: Rank[] = [
   { min: 1, name: 'Дембель', desc: 'Свободен! Альбом собран, аксельбант блестит.' },
 ];
 
-export const RANKS_WAIT: Rank[] = [
-  { min: 0, name: 'Проводила', desc: 'Самые тяжёлые первые дни. Держись!' },
-  { min: 0.03, name: 'Жду', desc: 'Письма, звонки и фотки — твоё топливо.' },
-  { min: 0.25, name: 'Держусь', desc: 'Четверть позади. Ты сильнее, чем кажется.' },
-  { min: 0.5, name: 'Экватор', desc: 'Половина пути! Дальше будет только быстрее.' },
-  { min: 0.75, name: 'Совсем скоро', desc: 'Пора думать, что надеть на встречу.' },
-  { min: 1, name: 'Дождалась', desc: 'Он дома! Ты — настоящая героиня.' },
-];
-
-export const ranksFor = (mode: Mode) => (mode === 'serve' ? RANKS_SERVE : RANKS_WAIT);
-
-export function rankOf(pct: number, mode: Mode) {
-  const list = ranksFor(mode);
+export function rankOf(pct: number) {
+  const list = RANKS;
   let idx = 0;
   list.forEach((r, i) => {
     if (pct >= r.min) idx = i;
@@ -45,7 +34,7 @@ export const THEMES: { id: ThemeId; name: string; a: string; b: string; bg: stri
   { id: 'vks', name: 'ВКС', a: '#a78bfa', b: '#22d3ee', bg: '#0a0716' },
 ];
 
-export const QUOTES_SERVE = [
+export const QUOTES = [
   'Солдат спит — служба идёт.',
   'Дембель неизбежен, как восход солнца.',
   'Тяжело в учении — легко в бою. © Суворов',
@@ -68,16 +57,6 @@ export const QUOTES_SERVE = [
   'Мама, я скоро! Готовь пельмени.',
 ];
 
-export const QUOTES_WAIT = [
-  'Кто умеет ждать — тот дождётся.',
-  'Каждый день без него — это день ближе к встрече.',
-  'Любовь измеряется не расстоянием, а терпением.',
-  'Он там служит — ты здесь держишь тыл.',
-  'Скоро будешь встречать на вокзале с плакатом.',
-  'Письмо сегодня — улыбка у него завтра.',
-  'Разлука для любви — что ветер для огня.',
-  'Отметь ещё один день. Ты молодец.',
-];
 
 export const ROUTINE = [
   { h: 6, m: 0, name: 'Подъём', icon: '⏰' },
@@ -151,7 +130,13 @@ export function achievementsFor(s: number, e: number) {
     .sort((x, y) => x.ts - y.ts);
 }
 
-export const labels = (mode: Mode) =>
-  mode === 'serve'
-    ? { until: 'до дембеля', passed: 'Отслужено', left: 'Осталось', who: 'Боец', finish: 'ДМБ', doneTitle: 'ДЕМБЕЛЬ!', doneSub: 'Служба окончена. Ты свободен!' }
-    : { until: 'до возвращения', passed: 'Прошло', left: 'Осталось ждать', who: 'Солдат', finish: 'Встреча', doneTitle: 'ОН ДОМА!', doneSub: 'Ожидание окончено. Обнимай!' };
+// Единственный набор подписей: приложение считает срок службы солдата.
+export const LABELS = {
+  until: 'до дембеля',
+  passed: 'Отслужено',
+  left: 'Осталось',
+  who: 'Боец',
+  finish: 'ДМБ',
+  doneTitle: 'ДЕМБЕЛЬ!',
+  doneSub: 'Служба окончена. Ты свободен!',
+};
