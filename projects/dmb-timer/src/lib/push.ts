@@ -9,7 +9,7 @@ import type { NotifySchedule } from './notify';
 
 export const VAPID_PUBLIC_KEY =
   import.meta.env.VITE_VAPID_PUBLIC_KEY ||
-  'BEmk8JI24M-P73RmlyDT_du_YsIbfF8OMRDZxSryDF9H1t0ovfwcjYmpiBZExbGpaliTdIW_dIbk92s1B3VMxkM';
+  'BAVuck_ZPEaLcA2DWO7j2QUEYSWCKwp9KOcj-Vfb-fXsuNlnjtpb2PgL6XPPMbk0jKLPbJGHmqxXx9j0dpSrf4w';
 
 export const TZ_NAME =
   (typeof Intl !== 'undefined' && Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC';
