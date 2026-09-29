@@ -8,6 +8,7 @@
 | Проект | Что это | Стек | Живая версия |
 |---|---|---|---|
 | [**ДМБ Таймер**](projects/dmb-timer) | Дембельский таймер до секунды: стата, календарь, «сантиметр», медали, push-уведомления. PWA, работает офлайн | Vite 7 · React 19 · TypeScript · Tailwind 4 | https://dmb-timer.vercel.app |
+| [**Знакомая вода**](projects/znakomaya-voda) | Атмосферный симулятор морской рыбалки: акватории, коллекция рыб, порты, сезоны, аккаунты и облачные сохранения | Next.js 16 · React 19 · TypeScript · Tailwind 4 · Supabase Postgres | Настроить Vercel |
 | *Сайт-каталог* (`site/`) | Страница со списком проектов — открывается на корневом домене | HTML + CSS, без сборки | https://apps-markusfarfall.vercel.app |
 
 ## Структура
@@ -17,9 +18,14 @@
 ├── site/                    каталог проектов (статический лендинг)
 │   └── index.html
 ├── projects/
-│   └── dmb-timer/           ДМБ Таймер — исходники
+│   ├── dmb-timer/           ДМБ Таймер — исходники
+│   │   ├── src/
+│   │   ├── public/
+│   │   ├── package.json
+│   │   └── README.md
+│   └── znakomaya-voda/      Знакомая вода — Next.js + Supabase Postgres
 │       ├── src/
-│       ├── public/
+│       ├── supabase/
 │       ├── package.json
 │       └── README.md
 └── README.md                этот файл
@@ -34,8 +40,9 @@
 
 ## Деплой
 
-- **Vercel, Git-интеграция.** Проекты `apps` (корневой каталог, Root Directory `site`) и `dmb-timer`
-  (Root Directory `projects/dmb-timer`) подключены к этому репозиторию.
+- **Vercel, Git-интеграция.** Проекты `apps` (Root Directory `site`) и `dmb-timer`
+  (Root Directory `projects/dmb-timer`) подключены. `znakomaya-voda` требует отдельного проекта Vercel
+  с Root Directory `projects/znakomaya-voda` и переменной `DATABASE_URL` от Supabase.
 - `main` → production. Любая другая ветка → preview-деплой с отдельным URL.
 
 ## Заметки по окружению

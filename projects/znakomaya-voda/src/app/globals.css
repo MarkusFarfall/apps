@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 @theme {
-  --font-serif: var(--font-display), "Cormorant Garamond", Georgia, serif;
-  --font-sans: var(--font-text), "Inter", system-ui, sans-serif;
+  --font-serif: "Cormorant Garamond Variable", "Cormorant Garamond", Georgia, serif;
+  --font-sans: "Inter Variable", Inter, system-ui, sans-serif;
   --color-ink: #e6e1d6;
   --color-brass: #c8a46a;
   --color-brass-2: #e3c996;
@@ -12,6 +12,8 @@
 }
 
 :root {
+  --font-text: "Inter Variable";
+  --font-display: "Cormorant Garamond Variable";
   --glass: rgba(7, 13, 21, 0.74);
   --glass-2: rgba(10, 18, 28, 0.9);
   --line: rgba(230, 225, 214, 0.1);

@@ -1,7 +1,7 @@
 # Подключение к Supabase
 
 1. Создайте проект в Supabase и скопируйте строку подключения
-   (**Project Settings → Database → Connection string → Session pooler**).
+   (**Project Settings → Database → Connection string → Transaction pooler**; для Vercel предпочтительнее pooler, а не прямые подключения).
 2. Пропишите её в `.env` как `DATABASE_URL` (пример — в `.env.example`).
 3. Создайте таблицы одним из способов:
    - **SQL Editor:** выполните `supabase/schema.sql`, затем `supabase/security.sql`;

@@ -1,0 +1,13 @@
+# Dependencies and Next.js output
+node_modules/
+.next/
+out/
+build/
+
+# Local environment (keep the example template)
+.env*
+!.env.example
+
+# TypeScript and editor caches
+*.tsbuildinfo
+.DS_Store

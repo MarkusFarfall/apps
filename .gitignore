@@ -77,3 +77,6 @@ tmp/
 # ---- Служебное окружения песочницы ----
 .npm/
 .sudo_as_admin_successful
+
+# Example environment files are safe to commit; real local env files are ignored.
+!**/.env.example
