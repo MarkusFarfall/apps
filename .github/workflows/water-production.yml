@@ -43,7 +43,7 @@ on:
         type: string
         required: false
   push:
-    branches: [main, arena/01a0ee94-apps]
+    branches: [main]
     paths:
       - "projects/water-import/**"
       - ".github/workflows/water-production.yml"
