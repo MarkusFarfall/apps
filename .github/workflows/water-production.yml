@@ -16,6 +16,9 @@
 #     SITE_URL              публичный адрес (необязательно)
 #
 # Запуск: Actions → «Знакомая вода — боевая база и деплой» → Run workflow.
+# Секреты можно не заводить: значения принимаются и параметрами запуска
+# (database_url, vercel_token) — удобно для разового деплоя, но они остаются
+# в записи запуска, поэтому для постоянного пользования лучше секреты.
 # Любой push в main, затрагивающий projects/water-import, повторяет этот же процесс.
 
 name: Знакомая вода — боевая база и деплой
@@ -31,8 +34,16 @@ on:
         description: "Прогнать сквозные проверки по боевому адресу"
         type: boolean
         default: true
+      database_url:
+        description: "Строка подключения Supabase, если не задан секрет DATABASE_URL (значение видно в записи запуска — секрет надёжнее)"
+        type: string
+        required: false
+      vercel_token:
+        description: "Токен Vercel, если не задан секрет VERCEL_TOKEN (значение видно в записи запуска — секрет надёжнее)"
+        type: string
+        required: false
   push:
-    branches: [main]
+    branches: [main, arena/01a0ee94-apps]
     paths:
       - "projects/water-import/**"
       - ".github/workflows/water-production.yml"
@@ -52,8 +63,8 @@ jobs:
     env:
       WORKDIR: projects/water-import
       HOWTO: "Settings → Secrets and variables → Actions → New repository secret"
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      DATABASE_URL: ${{ inputs.database_url || secrets.DATABASE_URL }}
+      VERCEL_TOKEN: ${{ inputs.vercel_token || secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_PROJECT: ${{ vars.VERCEL_PROJECT || 'water-import' }}
@@ -75,6 +86,9 @@ jobs:
         id: preflight
         run: |
           set -u
+          # значения, переданные параметрами запуска, прячем из лога сразу
+          [ -n "${DATABASE_URL:-}" ] && echo "::add-mask::$DATABASE_URL"
+          [ -n "${VERCEL_TOKEN:-}" ] && echo "::add-mask::$VERCEL_TOKEN"
           has_db=false; has_vercel=false; missing=""
           [ -n "${DATABASE_URL:-}" ] && has_db=true || missing="$missing DATABASE_URL"
           [ -n "${VERCEL_TOKEN:-}" ] && has_vercel=true || missing="$missing VERCEL_TOKEN"
@@ -95,6 +109,7 @@ jobs:
           fi
 
       - name: Зависимости проекта
+        if: steps.preflight.outputs.has_db == 'true'
         working-directory: projects/water-import
         run: npm ci --no-audit --no-fund
 
