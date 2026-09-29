@@ -1,0 +1,189 @@
+# Боевой запуск «Знакомой воды»: база Supabase + деплой на Vercel + сквозные проверки.
+#
+# Что нужно один раз сделать в настройках репозитория
+# (Settings → Secrets and variables → Actions):
+#
+#   Secrets:
+#     DATABASE_URL          строка подключения Supabase
+#                           (Connect → Session pooler, порт 5432)
+#     VERCEL_TOKEN          Vercel → Settings → Tokens → Create
+#     VERCEL_ORG_ID         (необязательно, если проект ещё не создан)
+#     VERCEL_PROJECT_ID     (необязательно, если проект ещё не создан)
+#
+#   Variables:
+#     VERCEL_PROJECT        имя проекта на Vercel, по умолчанию water-import
+#     VERCEL_SCOPE          команда/аккаунт Vercel, если их несколько (необязательно)
+#     SITE_URL              публичный адрес (необязательно)
+#
+# Запуск: Actions → «Знакомая вода — боевая база и деплой» → Run workflow.
+# Любой push в main, затрагивающий projects/water-import, повторяет этот же процесс.
+
+name: Знакомая вода — боевая база и деплой
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Выложить на Vercel (нужен секрет VERCEL_TOKEN)"
+        type: boolean
+        default: true
+      smoke:
+        description: "Прогнать сквозные проверки по боевому адресу"
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+    paths:
+      - "projects/water-import/**"
+      - ".github/workflows/water-production.yml"
+
+concurrency:
+  group: water-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  production:
+    name: База и деплой
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      WORKDIR: projects/water-import
+      HOWTO: "Settings → Secrets and variables → Actions → New repository secret"
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_PROJECT: ${{ vars.VERCEL_PROJECT || 'water-import' }}
+      VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE }}
+      SITE_URL: ${{ vars.SITE_URL }}
+      DEPLOY: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy }}
+      RUN_SMOKE: ${{ github.event_name != 'workflow_dispatch' || inputs.smoke }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: projects/water-import/package-lock.json
+
+      - name: Проверка настроек
+        id: preflight
+        run: |
+          set -u
+          has_db=false; has_vercel=false; missing=""
+          [ -n "${DATABASE_URL:-}" ] && has_db=true || missing="$missing DATABASE_URL"
+          [ -n "${VERCEL_TOKEN:-}" ] && has_vercel=true || missing="$missing VERCEL_TOKEN"
+          echo "has_db=$has_db" >> "$GITHUB_OUTPUT"
+          echo "has_vercel=$has_vercel" >> "$GITHUB_OUTPUT"
+
+          need=""
+          [ "$has_db" = true ] || need="$need DATABASE_URL"
+          if [ "${DEPLOY:-true}" = "true" ] && [ "$has_vercel" != true ]; then need="$need VERCEL_TOKEN"; fi
+
+          if [ -z "$need" ]; then
+            echo "✓ все нужные секреты на месте"
+          elif [ "${GITHUB_EVENT_NAME:-}" = "workflow_dispatch" ]; then
+            echo "::error title=Не заданы секреты::Не хватает:${need}. Добавьте в ${HOWTO}. DATABASE_URL — строка подключения Supabase (Connect → Session pooler), VERCEL_TOKEN — Vercel → Settings → Tokens."
+            exit 1
+          else
+            echo "::warning title=Секреты не заданы::Не хватает:${need}. Добавьте в ${HOWTO}, иначе база и деплой не обновятся."
+          fi
+
+      - name: Зависимости проекта
+        working-directory: projects/water-import
+        run: npm ci --no-audit --no-fund
+
+      - name: Схема и политики доступа в базе
+        if: steps.preflight.outputs.has_db == 'true'
+        run: node "$WORKDIR/scripts/db-migrate.mjs"
+
+      - name: Деплой на Vercel
+        id: deploy
+        if: steps.preflight.outputs.has_vercel == 'true' && env.DEPLOY == 'true'
+        working-directory: projects/water-import
+        run: |
+          set -euo pipefail
+          V="npx --yes vercel@latest"
+          SCOPE=()
+          [ -n "${VERCEL_SCOPE:-}" ] && SCOPE=(--scope "$VERCEL_SCOPE")
+
+          if [ -n "${VERCEL_ORG_ID:-}" ] && [ -n "${VERCEL_PROJECT_ID:-}" ]; then
+            echo "→ проект задан явно через VERCEL_ORG_ID / VERCEL_PROJECT_ID"
+          else
+            echo "→ создаю и привязываю проект «$VERCEL_PROJECT»"
+            $V project add "$VERCEL_PROJECT" "${SCOPE[@]}" --token "$VERCEL_TOKEN" >/dev/null 2>&1 || true
+            $V link --yes --project "$VERCEL_PROJECT" "${SCOPE[@]}" --token "$VERCEL_TOKEN" \
+              || echo "! привязать проект не удалось — Vercel создаст его при первом деплое"
+          fi
+
+          set_env() { # set_env <имя> <значение>
+            local name="$1" value="${2:-}"
+            [ -n "$value" ] || return 0
+            $V env rm "$name" production --yes "${SCOPE[@]}" --token "$VERCEL_TOKEN" >/dev/null 2>&1 || true
+            printf '%s' "$value" | $V env add "$name" production "${SCOPE[@]}" --token "$VERCEL_TOKEN" >/dev/null
+            echo "  · переменная $name задана"
+          }
+          set_env DATABASE_URL "$DATABASE_URL"
+          set_env SITE_URL "$SITE_URL"
+
+          echo "→ сборка и публикация (несколько минут)"
+          log="$(mktemp)"
+          if ! $V deploy --prod --yes "${SCOPE[@]}" --token "$VERCEL_TOKEN" > "$log" 2>&1; then
+            echo "::error title=Деплой не удался::vercel завершился с ошибкой"
+            tail -n 40 "$log"
+            exit 1
+          fi
+          tail -n 5 "$log"
+
+          url="$(tail -n 1 "$log" | tr -d '\r[:space:]')"
+          case "$url" in
+            https://*) ;;
+            *) url="$(grep -Eo 'https://[A-Za-z0-9._-]+\.vercel\.app' "$log" | tail -n 1)" ;;
+          esac
+          case "$url" in
+            https://*) ;;
+            *) url="$(grep -Eo 'https://[A-Za-z0-9._-]+' "$log" | tail -n 1)" ;;
+          esac
+          case "$url" in
+            https://*) ;;
+            *) echo "::error title=Не получил адрес деплоя::vercel вернул: $url"; exit 1 ;;
+          esac
+
+          echo "→ жду, пока адрес начнёт отвечать: $url"
+          for _ in $(seq 1 20); do
+            if curl -sf --max-time 10 "$url/api/health" >/dev/null; then break; fi
+            sleep 6
+          done
+          curl -sS --max-time 20 "$url/api/health" || true
+          echo
+          echo "✓ адрес: $url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Сквозные проверки по боевому адресу
+        if: steps.deploy.outputs.url != '' && env.RUN_SMOKE == 'true' && steps.preflight.outputs.has_db == 'true'
+        working-directory: projects/water-import
+        run: BASE_URL="${{ steps.deploy.outputs.url }}" bash scripts/smoke.sh
+
+      - name: Итог
+        if: always()
+        run: |
+          {
+            echo "## Знакомая вода"
+            echo
+            if [ -n "${{ steps.deploy.outputs.url }}" ]; then
+              echo "- Боевой адрес: ${{ steps.deploy.outputs.url }}"
+            else
+              echo "- Деплой не выполнялся (нет VERCEL_TOKEN или выключен входной параметр deploy)"
+            fi
+            if [ "${{ steps.preflight.outputs.has_db }}" = "true" ]; then
+              echo "- База: схема и политики доступа применены"
+            else
+              echo "- База: секрет DATABASE_URL не задан — шаг пропущен"
+            fi
+            echo "- Проверки: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"
