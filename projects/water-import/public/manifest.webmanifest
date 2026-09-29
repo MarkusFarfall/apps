@@ -1,0 +1,12 @@
+{
+  "name": "Знакомая вода",
+  "short_name": "Знакомая вода",
+  "description": "Симулятор морской рыбалки: двенадцать акваторий, триста видов рыб, погода, сезоны и глубина.",
+  "lang": "ru",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#050a12",
+  "theme_color": "#050a12",
+  "icons": [{ "src": "/icon.jpg", "sizes": "1024x1024", "type": "image/jpeg", "purpose": "any" }]
+}

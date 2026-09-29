@@ -1,0 +1,20 @@
+# зависимости и сборка
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+
+# локальные секреты (шаблон .env.example — в репозитории)
+.env
+.env.*
+!.env.example
+
+# Vercel
+.vercel
+
+# ОС и редакторы
+.DS_Store
+*.log
+.vscode/
+.idea/
