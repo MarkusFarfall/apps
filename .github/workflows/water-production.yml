@@ -70,7 +70,7 @@ jobs:
       VERCEL_PROJECT: ${{ vars.VERCEL_PROJECT || 'water-import' }}
       VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE }}
       SITE_URL: ${{ vars.SITE_URL }}
-      DEPLOY: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy }}
+      DEPLOY: ${{ (github.event_name == 'workflow_dispatch' && inputs.deploy) || 'false' }}
       RUN_SMOKE: ${{ github.event_name != 'workflow_dispatch' || inputs.smoke }}
 
     steps:
@@ -120,7 +120,8 @@ jobs:
       - name: Деплой на Vercel
         id: deploy
         if: steps.preflight.outputs.has_vercel == 'true' && env.DEPLOY == 'true'
-        working-directory: projects/water-import
+        # важно: запускаем из КОРНЯ репозитория — при заданном Root Directory проекта
+        # (`projects/water-import`) CLI добавляет его сам; из подпапки путь склеивался дважды
         run: |
           set -euo pipefail
           V="npx --yes vercel@latest"
@@ -180,9 +181,21 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
       - name: Сквозные проверки по боевому адресу
-        if: steps.deploy.outputs.url != '' && env.RUN_SMOKE == 'true' && steps.preflight.outputs.has_db == 'true'
+        if: (steps.deploy.outputs.url != '' || vars.SITE_URL != '') && env.RUN_SMOKE == 'true' && steps.preflight.outputs.has_db == 'true'
         working-directory: projects/water-import
-        run: BASE_URL="${{ steps.deploy.outputs.url }}" bash scripts/smoke.sh
+        env:
+          BASE_URL: ${{ steps.deploy.outputs.url || vars.SITE_URL }}
+        run: |
+          set -u
+          echo "→ адрес проверок: $BASE_URL"
+          echo '→ жду, пока база на боевом адресе поднимется (сборка из Git идёт параллельно)'
+          for _ in $(seq 1 40); do
+            if curl -sf --max-time 10 "$BASE_URL/api/health" | grep -q '"db":"up"'; then break; fi
+            sleep 8
+          done
+          curl -sS --max-time 20 "$BASE_URL/api/health" || true
+          echo
+          bash scripts/smoke.sh
 
       - name: Итог
         if: always()
