@@ -30,7 +30,7 @@ npm run dev                    # http://localhost:3000
 
 ```bash
 node scripts/db-migrate.mjs                 # таблицы + политики доступа (повторный запуск безопасен)
-# или: npx drizzle-kit migrate              # миграции из drizzle/
+# или: npx drizzle-kit migrate              # миграции из drizzle/ (DATABASE_URL из окружения или .env.local)
 # или: выполнить supabase/schema.sql, затем supabase/security.sql в SQL-редакторе Supabase
 ```
 
@@ -53,7 +53,7 @@ npm run build && npm start     # сборка не зависит от внеш�
 
 | Переменная | Назначение |
 |---|---|
-| `DATABASE_URL` | строка подключения к Postgres (без неё приложение не стартует) |
+| `DATABASE_URL` | строка подключения к Postgres. Нужна в рантайме: без неё `/api/health` отвечает `db: down`, а маршруты — 503. Сборка (`next build`) базы не требует |
 | `SITE_URL` | публичный адрес для OpenGraph-ссылок; на Vercel подставляется автоматически |
 
 ## Аккаунты и сохранения
