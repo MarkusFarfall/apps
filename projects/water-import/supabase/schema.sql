@@ -60,6 +60,13 @@ CREATE INDEX "sessions_user_idx" ON "sessions" USING btree ("user_id");
 CREATE INDEX "sessions_expires_idx" ON "sessions" USING btree ("expires_at");
 CREATE UNIQUE INDEX "users_username_lower_uq" ON "users" USING btree ("username_lower");
 
+CREATE TABLE "rate_limits" (
+	"key" varchar(200) PRIMARY KEY NOT NULL,
+	"count" integer DEFAULT 1 NOT NULL,
+	"reset_at" timestamp with time zone NOT NULL
+);
+CREATE INDEX "rate_limits_reset_idx" ON "rate_limits" USING btree ("reset_at");
+
 -- ── безопасность для Supabase (см. security.sql) ──
 alter table public.users    enable row level security;
 alter table public.sessions enable row level security;

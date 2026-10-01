@@ -113,6 +113,13 @@ jobs:
         working-directory: projects/water-import
         run: npm ci --no-audit --no-fund
 
+      - name: Типы и стиль кода
+        if: steps.preflight.outputs.has_db == 'true'
+        working-directory: projects/water-import
+        run: |
+          npm run typecheck
+          npm run lint
+
       - name: Схема и политики доступа в базе
         if: steps.preflight.outputs.has_db == 'true'
         run: node "$WORKDIR/scripts/db-migrate.mjs"

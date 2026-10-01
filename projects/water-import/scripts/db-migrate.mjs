@@ -55,6 +55,30 @@ try {
     await client.query(read('schema.sql'));
   }
 
+  // Таблицы, добавленные позже базовой схемы. Раньше миграция при виде готовых
+  // таблиц ничего не делала, поэтому на уже развёрнутых базах новые таблицы
+  // не появлялись — создаём их отдельно и безопасно для повторного запуска.
+  const later = [
+    {
+      name: 'rate_limits',
+      sql: `create table if not exists public.rate_limits (
+              key varchar(200) primary key,
+              count integer not null default 1,
+              reset_at timestamptz not null
+            );
+            create index if not exists rate_limits_reset_idx on public.rate_limits (reset_at);`,
+    },
+  ];
+  for (const t of later) {
+    const has = await client.query("select to_regclass('public.' || $1)::text as t", [t.name]);
+    if (has.rows[0].t) {
+      console.log(`→ таблица ${t.name} уже есть`);
+    } else {
+      await client.query(t.sql);
+      console.log(`→ создана таблица ${t.name}`);
+    }
+  }
+
   console.log('→ применяю политики доступа (supabase/security.sql)');
   await client.query(read('security.sql'));
 

@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { ServiceWorker } from "@/components/game/ServiceWorker";
 // Шрифты подключены локально (@fontsource) — сборка не зависит от Google Fonts.
 import "@fontsource/cormorant-garamond/400.css";
 import "@fontsource/cormorant-garamond/400-italic.css";
@@ -23,7 +24,14 @@ export const metadata: Metadata = {
   applicationName: "Знакомая вода",
   ...(siteUrl ? { metadataBase: new URL(siteUrl) } : {}),
   manifest: "/manifest.webmanifest",
-  icons: { icon: [{ url: "/icon.jpg", type: "image/jpeg" }], apple: [{ url: "/icon.jpg" }] },
+  icons: {
+    icon: [
+      { url: "/favicon.ico", type: "image/x-icon" },
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-icon.png", sizes: "180x180" }],
+  },
   openGraph: {
     title: "Знакомая вода",
     description: "Симулятор морской рыбалки: двенадцать акваторий, триста видов рыб, пять портов.",
@@ -46,7 +54,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="ru">
-      <body className="bg-[#050a12] text-[#e6e1d6] antialiased">{children}</body>
+      <body className="bg-[#050a12] text-[#e6e1d6] antialiased">
+        {children}
+        <ServiceWorker />
+      </body>
     </html>
   );
 }

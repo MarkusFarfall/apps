@@ -84,6 +84,16 @@ rm -f "$COOKIES"
 check "$USERNAME" "$(api POST /api/auth/login "{\"login\":\"$USERNAME\",\"password\":\"$PASS\"}" | json_field user.username)" "вход по паролю"
 check "4200" "$(api GET "/api/save?playerId=$PID" | json_field save.money)" "прогресс доступен со второго устройства"
 
+echo "── 8а. накрутка сохранения не проходит"
+HACK='{"version":3,"name":"Тест","money":999999999999,"xp":999999999,"codex":{"turbot":{"count":1,"maxWeight":9999,"firstDay":1,"variants":[]},"ne_suschestvuet":{"count":5,"maxWeight":1,"firstDay":1,"variants":[]}},"achievements":["first","first"],"stats":{"playSeconds":999999999,"totalCaught":999999,"totalEarned":1,"linesSnapped":0,"escaped":0,"nightCatches":0,"stormCatches":0,"releases":0,"jumps":0,"maxDepthCaught":0,"perfectHooks":0,"biggest":null}}'
+api PUT /api/save "{\"playerId\":\"$PID\",\"name\":\"Тест\",\"data\":$HACK,\"force\":true}" > /dev/null
+check "100000000" "$(api GET "/api/save?playerId=$PID" | json_field save.money)" "невозможные монеты срезаны"
+check "2000000" "$(api GET "/api/save?playerId=$PID" | json_field save.xp)" "невозможный опыт срезан"
+check "1" "$(api GET "/api/save?playerId=$PID" | node -e 'let r="";process.stdin.on("data",c=>r+=c).on("end",()=>{const x=JSON.parse(r).save.codex;console.log(Object.keys(x).length)})')" "несуществующий вид выброшен из кодекса"
+# у тюрбо максимум вида 6 кг, значит допустимый предел с запасом на трофей — 6.3
+HACKW="$(api GET "/api/save?playerId=$PID" | node -e 'let r="";process.stdin.on("data",c=>r+=c).on("end",()=>{const w=JSON.parse(r).save.codex.turbot.maxWeight;console.log(Math.abs(w-6.3)<0.01?"ограничен по виду":"НЕ ОГРАНИЧЕН: "+w)})')"
+check "ограничен по виду" "$HACKW" "вес рыбы ограничен максимумом вида"
+
 echo "── 9. выход"
 check "200" "$(status -X POST "$BASE_URL/api/auth/logout")" "logout"
 check "" "$(api GET /api/auth/me | json_field user)" "сессия закрыта"

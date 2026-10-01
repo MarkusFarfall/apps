@@ -2,8 +2,9 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { players, saves } from "@/db/schema";
 import { levelFromXp } from "@/game/progress";
-import { checkPlayerAccess, cleanName } from "@/lib/auth";
+import { checkPlayerAccess, cleanName, rateLimit } from "@/lib/auth";
 import { body, dbError, fail, json, sameOrigin } from "@/lib/http";
+import { sanitizeSave } from "@/lib/sanitize";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,7 @@ export async function GET(req: Request) {
 
 export async function PUT(req: Request) {
   if (!sameOrigin(req)) return fail("forbidden", 403);
+  if (!(await rateLimit("save", 120, 60_000))) return fail("Слишком часто: подождите минуту", 429);
   const b = await body<{ playerId?: string; name?: string; data?: Record<string, unknown>; force?: boolean }>(req);
   if (!b) return fail("Некорректный запрос");
   const playerId = b.playerId ?? "";
@@ -30,8 +32,11 @@ export async function PUT(req: Request) {
   if (JSON.stringify(data).length > 500_000) return fail("too large", 413);
 
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0);
-  const stats = (data.stats ?? {}) as Record<string, unknown>;
   const name = cleanName(b.name) ?? "Рыбак";
+  // прогресс приходит с клиента — приводим его к разумному виду, прежде чем считать рейтинг
+  const clean = sanitizeSave(data);
+  const save = clean.data;
+  const stats = (save.stats ?? {}) as Record<string, unknown>;
 
   try {
     const acc = await checkPlayerAccess(playerId);
@@ -47,14 +52,14 @@ export async function PUT(req: Request) {
       .onConflictDoUpdate({ target: players.id, set: { lastSeenAt: sql`now()`, name } });
     const values = {
       playerId,
-      data,
-      version: num(data.version) || 1,
-      money: num(data.money),
-      codexCount: data.codex && typeof data.codex === "object" ? Object.keys(data.codex as object).length : 0,
+      data: save,
+      version: num(save.version) || 1,
+      money: num(save.money),
+      codexCount: clean.species,
       totalCaught: num(stats.totalCaught),
       playSeconds: num(stats.playSeconds),
-      level: levelFromXp(num(data.xp)),
-      achievements: Array.isArray(data.achievements) ? data.achievements.length : 0,
+      level: levelFromXp(num(save.xp)),
+      achievements: clean.achievements,
     };
     await db.insert(saves).values(values).onConflictDoUpdate({ target: saves.playerId, set: { ...values, updatedAt: sql`now()` } });
     return json({ ok: true });

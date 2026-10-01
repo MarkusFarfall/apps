@@ -73,20 +73,33 @@ export function validatePassword(raw: unknown): string | { error: string } {
 }
 
 // ─────────── ограничение частоты ───────────
-const buckets = new Map<string, { n: number; reset: number }>();
+// Счётчики живут в базе: раньше они лежали в памяти инстанса и обнулялись на каждом
+// холодном старте, а между параллельными лямбдами вообще не разделялись — то есть
+// защита от перебора работала лишь частично. Теперь окно общее для всего прода.
 export async function rateLimit(scope: string, limit: number, windowMs: number) {
   const h = await headers();
   const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || h.get("x-real-ip") || "local";
-  const key = `${scope}:${ip}`;
-  const now = Date.now();
-  const b = buckets.get(key);
-  if (!b || b.reset < now) {
-    buckets.set(key, { n: 1, reset: now + windowMs });
-    if (buckets.size > 5000) for (const [k, v] of buckets) if (v.reset < now) buckets.delete(k);
+  const key = `${scope}:${ip}`.slice(0, 190);
+  try {
+    const res = await db.execute(sql`
+      insert into rate_limits (key, count, reset_at)
+      values (${key}, 1, now() + ${Math.max(1000, Math.floor(windowMs))} * interval '1 millisecond')
+      on conflict (key) do update set
+        count = case when rate_limits.reset_at < now() then 1 else rate_limits.count + 1 end,
+        reset_at = case when rate_limits.reset_at < now() then excluded.reset_at else rate_limits.reset_at end
+      returning count, reset_at
+    `);
+    const row = (res.rows as { count: number; reset_at: Date }[])[0];
+    // редкая уборка, чтобы таблица не росла бесконечно
+    if (Math.random() < 0.02) {
+      db.execute(sql`delete from rate_limits where reset_at < now() - interval '1 day'`).catch(() => {});
+    }
+    return (row?.count ?? 1) <= limit;
+  } catch (e) {
+    // база недоступна — лучше пропустить запрос, чем ронять весь сайт
+    console.error("[rate-limit]", e);
     return true;
   }
-  b.n++;
-  return b.n <= limit;
 }
 
 // ─────────── сессии ───────────

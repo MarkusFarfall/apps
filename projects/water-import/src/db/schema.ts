@@ -15,6 +15,17 @@ export const users = pgTable(
   (t) => [uniqueIndex("users_username_lower_uq").on(t.usernameLower)],
 );
 
+// Счётчики ограничения частоты (общие для всех инстансов)
+export const rateLimits = pgTable(
+  "rate_limits",
+  {
+    key: varchar("key", { length: 200 }).primaryKey(),
+    count: integer("count").notNull().default(1),
+    resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("rate_limits_reset_idx").on(t.resetAt)],
+);
+
 // Сессии: в базе хранится только SHA-256 от токена
 export const sessions = pgTable(
   "sessions",

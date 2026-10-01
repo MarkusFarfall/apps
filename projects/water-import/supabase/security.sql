@@ -7,6 +7,7 @@ alter table public.sessions enable row level security;
 alter table public.players  enable row level security;
 alter table public.saves    enable row level security;
 alter table public.catches  enable row level security;
+alter table public.rate_limits enable row level security;
 
 -- Отзываем права у публичных ролей Supabase. В обычном PostgreSQL (локальная разработка)
 -- таких ролей нет — тогда шаг просто пропускается, а не роняет скрипт с ошибкой.
@@ -25,7 +26,7 @@ begin
   end if;
 
   execute format(
-    'revoke all on public.users, public.sessions, public.players, public.saves, public.catches from %s',
+    'revoke all on public.users, public.sessions, public.players, public.saves, public.catches, public.rate_limits from %s',
     roles
   );
 end
