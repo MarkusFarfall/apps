@@ -14,7 +14,6 @@ FAILS=0
 # уникальные имена на каждый прогон, чтобы не упираться в «имя занято»
 STAMP="$(date +%s)"
 USERNAME="test_${STAMP}"
-EMAIL="test_${STAMP}@example.invalid"
 PASS="more2026sol"
 GUEST="$(node -e 'console.log(crypto.randomUUID())')"
 PID=""
@@ -54,7 +53,7 @@ GOT="$(api GET "/api/save?playerId=$GUEST" | json_field save.money)"
 check "1500" "$GOT" "GET /api/save → монет 1500"
 
 echo "── 2. регистрация с переносом гостевого прогресса"
-RESP="$(api POST /api/auth/register "{\"username\":\"$USERNAME\",\"email\":\"$EMAIL\",\"password\":\"$PASS\",\"guestId\":\"$GUEST\"}")"
+RESP="$(api POST /api/auth/register "{\"username\":\"$USERNAME\",\"password\":\"$PASS\",\"guestId\":\"$GUEST\"}")"
 PID="$(printf '%s' "$RESP" | json_field playerId)"
 check "$GUEST" "$PID" "гостевой профиль принят аккаунтом"
 

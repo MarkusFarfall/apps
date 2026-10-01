@@ -1,4 +1,4 @@
-import { eq, or } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { createSession, playerForUser, rateLimit, toPublic, verifyPassword } from "@/lib/auth";
@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   const password = typeof b?.password === "string" ? b.password : "";
   if (!login || !password || password.length > 128) return fail("Введите логин и пароль");
   try {
-    const rows = await db.select().from(users).where(or(eq(users.usernameLower, login), eq(users.email, login))).limit(1);
+    const rows = await db.select().from(users).where(eq(users.usernameLower, login)).limit(1);
     const u = rows[0];
     // одинаковое время ответа для существующих и несуществующих логинов
     const ok = await verifyPassword(password, u?.passwordHash ?? DUMMY);

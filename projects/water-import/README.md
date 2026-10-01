@@ -6,7 +6,7 @@
 **Стек:** Next.js 16 (App Router, Turbopack) · React 19 · TypeScript 5.9 · Tailwind CSS 4 ·
 Postgres через Drizzle ORM · canvas-рендер сцены и WebAudio-звук.
 
-**Играть:** https://water-import.vercel.app — прод собирается автоматически из ветки `main`
+**Играть:** https://znakomaya-voda.vercel.app — прод собирается автоматически из ветки `main`
 (проект Vercel `water-import`, Root Directory `projects/water-import`).
 
 ## Что есть в игре

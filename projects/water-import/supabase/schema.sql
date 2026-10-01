@@ -42,7 +42,6 @@ CREATE TABLE "users" (
 	"id" varchar(40) PRIMARY KEY NOT NULL,
 	"username" varchar(24) NOT NULL,
 	"username_lower" varchar(24) NOT NULL,
-	"email" varchar(254),
 	"password_hash" varchar(200) NOT NULL,
 	"role" varchar(16) DEFAULT 'player' NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -60,7 +59,6 @@ CREATE INDEX "saves_codex_idx" ON "saves" USING btree ("codex_count");
 CREATE INDEX "sessions_user_idx" ON "sessions" USING btree ("user_id");
 CREATE INDEX "sessions_expires_idx" ON "sessions" USING btree ("expires_at");
 CREATE UNIQUE INDEX "users_username_lower_uq" ON "users" USING btree ("username_lower");
-CREATE UNIQUE INDEX "users_email_uq" ON "users" USING btree ("email");
 
 -- ── безопасность для Supabase (см. security.sql) ──
 alter table public.users    enable row level security;

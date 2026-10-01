@@ -8,7 +8,6 @@ const saveKey = (pid: string) => `zv_save:${pid}`;
 export interface AccountUser {
   id: string;
   username: string;
-  email: string | null;
   createdAt: string;
 }
 export interface AccountStats {
@@ -103,8 +102,8 @@ export async function fetchMe() {
   return { user: r.data.user, playerId: r.data.playerId ?? null, stats: r.data.stats ?? null };
 }
 
-export async function register(username: string, email: string, password: string, guestId: string) {
-  return req<{ user: AccountUser; playerId: string }>("/api/auth/register", { method: "POST", body: JSON.stringify({ username, email: email || undefined, password, guestId }) });
+export async function register(username: string, password: string, guestId: string) {
+  return req<{ user: AccountUser; playerId: string }>("/api/auth/register", { method: "POST", body: JSON.stringify({ username, password, guestId }) });
 }
 
 export async function login(loginName: string, password: string) {

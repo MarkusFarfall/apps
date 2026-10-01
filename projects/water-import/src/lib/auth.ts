@@ -15,7 +15,6 @@ const SCRYPT = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 export interface PublicUser {
   id: string;
   username: string;
-  email: string | null;
   createdAt: string;
 }
 
@@ -62,14 +61,6 @@ export function validateUsername(raw: unknown): string | { error: string } {
   if (s.length < 3 || s.length > 24) return { error: "Имя пользователя — от 3 до 24 символов" };
   if (!/^[\p{L}\p{N}_.\-]+$/u.test(s)) return { error: "Допустимы буквы, цифры, точка, дефис и подчёркивание" };
   if (!isClean(s)) return { error: "Выберите другое имя" };
-  return s;
-}
-
-export function validateEmail(raw: unknown): string | null | { error: string } {
-  if (raw === undefined || raw === null || raw === "") return null;
-  if (typeof raw !== "string") return { error: "Некорректная почта" };
-  const s = raw.trim().toLowerCase();
-  if (s.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s)) return { error: "Некорректная почта" };
   return s;
 }
 
@@ -136,7 +127,7 @@ export async function currentUser(): Promise<(PublicUser & { passwordHash: strin
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!token || token.length > 100) return null;
   const rows = await db
-    .select({ id: users.id, username: users.username, email: users.email, createdAt: users.createdAt, passwordHash: users.passwordHash, expiresAt: sessions.expiresAt })
+    .select({ id: users.id, username: users.username, createdAt: users.createdAt, passwordHash: users.passwordHash, expiresAt: sessions.expiresAt })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .where(and(eq(sessions.id, tokenHash(token)), gt(sessions.expiresAt, new Date())))
@@ -148,13 +139,12 @@ export async function currentUser(): Promise<(PublicUser & { passwordHash: strin
     const expires = new Date(Date.now() + SESSION_DAYS * 864e5);
     db.update(sessions).set({ expiresAt: expires }).where(eq(sessions.id, tokenHash(token))).catch(() => {});
   }
-  return { id: r.id, username: r.username, email: r.email, createdAt: r.createdAt.toISOString(), passwordHash: r.passwordHash };
+  return { id: r.id, username: r.username, createdAt: r.createdAt.toISOString(), passwordHash: r.passwordHash };
 }
 
-export const toPublic = (u: { id: string; username: string; email: string | null; createdAt: string | Date }): PublicUser => ({
+export const toPublic = (u: { id: string; username: string; createdAt: string | Date }): PublicUser => ({
   id: u.id,
   username: u.username,
-  email: u.email,
   createdAt: typeof u.createdAt === "string" ? u.createdAt : u.createdAt.toISOString(),
 });
 

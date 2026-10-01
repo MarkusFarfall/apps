@@ -7,13 +7,12 @@ export const users = pgTable(
     id: varchar("id", { length: 40 }).primaryKey(),
     username: varchar("username", { length: 24 }).notNull(),
     usernameLower: varchar("username_lower", { length: 24 }).notNull(),
-    email: varchar("email", { length: 254 }),
     passwordHash: varchar("password_hash", { length: 200 }).notNull(),
     role: varchar("role", { length: 16 }).notNull().default("player"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   },
-  (t) => [uniqueIndex("users_username_lower_uq").on(t.usernameLower), uniqueIndex("users_email_uq").on(t.email)],
+  (t) => [uniqueIndex("users_username_lower_uq").on(t.usernameLower)],
 );
 
 // Сессии: в базе хранится только SHA-256 от токена

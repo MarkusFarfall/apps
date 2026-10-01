@@ -21,6 +21,50 @@ function Field({ label, hint, ...p }: { label: string; hint?: string } & React.I
   );
 }
 
+/** Глазок для поля пароля: показывает/скрывает введённое */
+function EyeIcon({ off }: { off: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {off ? (
+        <>
+          <path d="M3 3l18 18" />
+          <path d="M10.6 6.3A10 10 0 0 1 12 6.2c5 0 9 3.9 9 5.8 0 .9-.7 2-1.9 3.1" />
+          <path d="M6.3 7.9C4.4 9.1 3 11 3 12c0 1.9 4 5.8 9 5.8 1.3 0 2.5-.3 3.6-.7" />
+        </>
+      ) : (
+        <>
+          <path d="M3 12c0-1.9 4-5.8 9-5.8s9 3.9 9 5.8-4 5.8-9 5.8S3 13.9 3 12Z" />
+          <circle cx="12" cy="12" r="2.6" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/** Поле пароля с возможностью посмотреть введённое */
+function PasswordField({ label, hint, ...p }: { label: string; hint?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+  const [show, setShow] = useState(false);
+  return (
+    <label className="block">
+      <span className="label mb-1.5 block">{label}</span>
+      <span className="relative block">
+        <input {...p} type={show ? "text" : "password"} className="field !text-left !pr-12" />
+        <button
+          type="button"
+          onClick={() => setShow((v) => !v)}
+          className="dim absolute right-0 top-0 flex h-full w-11 cursor-pointer items-center justify-center transition-colors hover:text-[#ece6d8]"
+          aria-label={show ? "Скрыть пароль" : "Показать пароль"}
+          title={show ? "Скрыть пароль" : "Показать пароль"}
+          tabIndex={-1}
+        >
+          <EyeIcon off={show} />
+        </button>
+      </span>
+      {hint && <span className="mt-1 block text-[11px] dim">{hint}</span>}
+    </label>
+  );
+}
+
 function Shell({ children, onClose, label, title }: { children: ReactNode; onClose: () => void; label: string; title: string }) {
   return (
     <div className="fade-in absolute inset-0 z-[60] flex items-stretch justify-center bg-[#02050a]/78 backdrop-blur-[3px] sm:items-center sm:p-4" onPointerDown={(e) => e.stopPropagation()}>
@@ -49,15 +93,18 @@ export function AuthModal({ onClose, onAuthed, guestId, guestHasProgress, initia
   const [mode, setMode] = useState<"login" | "register">(initial);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [f, setF] = useState({ login: "", username: "", email: "", password: "", password2: "" });
+  const [f, setF] = useState({ username: "", password: "", password2: "" });
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setErr(null);
-    if (mode === "register" && f.password !== f.password2) return setErr("Пароли не совпадают");
+    if (mode === "register") {
+      if (f.password !== f.password2) return setErr("Пароли не совпадают");
+      if (f.password.length < 8) return setErr("Пароль — не короче 8 символов");
+    }
     setBusy(true);
-    const r = mode === "login" ? await login(f.login, f.password) : await register(f.username, f.email, f.password, guestId);
+    const r = mode === "login" ? await login(f.username, f.password) : await register(f.username, f.password, guestId);
     setBusy(false);
     if (!r.ok || !r.data.user) return setErr(r.data.error ?? "Не удалось выполнить запрос");
     onAuthed(r.data.user, r.data.playerId, mode);
@@ -72,15 +119,33 @@ export function AuthModal({ onClose, onAuthed, guestId, guestHasProgress, initia
       <form onSubmit={submit} className="space-y-4" noValidate>
         {mode === "login" ? (
           <>
-            <Field label="Имя пользователя или почта" autoComplete="username" value={f.login} onChange={set("login")} autoFocus />
-            <Field label="Пароль" type="password" autoComplete="current-password" value={f.password} onChange={set("password")} />
+            <Field label="Имя пользователя" autoComplete="username" value={f.username} onChange={set("username")} autoFocus />
+            <PasswordField label="Пароль" autoComplete="current-password" value={f.password} onChange={set("password")} />
           </>
         ) : (
           <>
-            <Field label="Имя пользователя" autoComplete="username" value={f.username} onChange={set("username")} hint="От 3 до 24 символов: буквы, цифры, точка, дефис" autoFocus />
-            <Field label="Почта · необязательно" type="email" autoComplete="email" value={f.email} onChange={set("email")} hint="Для входа по почте" />
-            <Field label="Пароль" type="password" autoComplete="new-password" value={f.password} onChange={set("password")} hint="Не короче 8 символов, буквы и цифры" />
-            <Field label="Повторите пароль" type="password" autoComplete="new-password" value={f.password2} onChange={set("password2")} />
+            <Field
+              label="Имя пользователя"
+              autoComplete="username"
+              value={f.username}
+              onChange={set("username")}
+              hint="От 3 до 24 символов: буквы, цифры, точка, дефис"
+              autoFocus
+            />
+            <PasswordField
+              label="Пароль"
+              autoComplete="new-password"
+              value={f.password}
+              onChange={set("password")}
+              hint="Не короче 8 символов, буквы и цифры"
+            />
+            <PasswordField
+              label="Повторите пароль"
+              autoComplete="new-password"
+              value={f.password2}
+              onChange={set("password2")}
+              hint={f.password2 && f.password !== f.password2 ? "Пароли пока не совпадают" : "Так же, как выше — чтобы не ошибиться"}
+            />
             {guestHasProgress && (
               <div className="flex gap-3 border-l-2 border-[var(--brass)] bg-[var(--brass-soft)] px-3 py-2.5 text-[12px] leading-relaxed text-[#e6dcc4]">
                 Текущий гостевой прогресс будет перенесён в новую учётную запись.
@@ -92,6 +157,9 @@ export function AuthModal({ onClose, onAuthed, guestId, guestHasProgress, initia
         <button type="submit" className="btn btn-solid h-11 w-full" disabled={busy}>{busy ? "Подождите…" : mode === "login" ? "Войти" : "Создать учётную запись"}</button>
         {mode === "login" && guestHasProgress && (
           <p className="text-[11px] leading-relaxed dim">После входа загрузится прогресс учётной записи. Гостевое сохранение останется на этом устройстве.</p>
+        )}
+        {mode === "register" && (
+          <p className="text-[11px] leading-relaxed dim">Почта не нужна: вход по имени пользователя и паролю. Пароль можно посмотреть — нажмите на глазок справа в поле.</p>
         )}
       </form>
     </Shell>
@@ -131,7 +199,7 @@ export function ProfileModal({ account, onClose, onLogout, onDeleted, sync }: { 
     <Shell onClose={onClose} label="Учётная запись" title={u.username}>
       <dl className="text-[13px]">
         {[
-          ["Почта", u.email ?? "не указана"],
+          ["Имя пользователя", u.username],
           ["С нами с", since],
           ["Уровень", st ? String(st.level) : "—"],
           ["Видов в кодексе", st ? String(st.codexCount) : "—"],
@@ -152,9 +220,9 @@ export function ProfileModal({ account, onClose, onLogout, onDeleted, sync }: { 
       )}
       {view === "password" && (
         <form onSubmit={doPassword} className="mt-6 space-y-4">
-          <Field label="Текущий пароль" type="password" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />
-          <Field label="Новый пароль" type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} hint="Не короче 8 символов, буквы и цифры" />
-          <Field label="Повторите новый пароль" type="password" autoComplete="new-password" value={pw.next2} onChange={(e) => setPw({ ...pw, next2: e.target.value })} />
+          <PasswordField label="Текущий пароль" autoComplete="current-password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />
+          <PasswordField label="Новый пароль" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} hint="Не короче 8 символов, буквы и цифры" />
+          <PasswordField label="Повторите новый пароль" autoComplete="new-password" value={pw.next2} onChange={(e) => setPw({ ...pw, next2: e.target.value })} />
           <div className="flex gap-2">
             <button type="button" className="btn btn-quiet flex-1" onClick={() => setView("main")}>Назад</button>
             <button type="submit" className="btn btn-solid flex-1" disabled={busy}>Сохранить</button>
