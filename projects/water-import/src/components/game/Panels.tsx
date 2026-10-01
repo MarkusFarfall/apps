@@ -332,7 +332,7 @@ function FishDetail({ f, engine }: { f: FishDef; engine: Engine }) {
 // ───────────────────────── ПОРТ ─────────────────────────
 
 export type PortTab = "market" | "orders" | "gear" | "bait" | "boats" | "map" | "rest";
-export function PortModal({ engine, onClose, onTravel, onReset, cloud, initialTab = "market" }: { engine: Engine; onClose: () => void; onTravel: (t: Trip) => void; onReset: () => void; cloud: string; initialTab?: PortTab }) {
+export function PortModal({ engine, onClose, onTravel, onRest, onReset, cloud, initialTab = "market" }: { engine: Engine; onClose: () => void; onTravel: (t: Trip) => void; onRest: () => void; onReset: () => void; cloud: string; initialTab?: PortTab }) {
   const [tab, setTab] = useState<PortTab>(initialTab);
   const [flash, setFlash] = useState<string | null>(null);
   const s = engine.s;
@@ -443,7 +443,7 @@ export function PortModal({ engine, onClose, onTravel, onReset, cloud, initialTa
 
         {tab === "orders" && (
           <div>
-            <p className="mb-5 max-w-2xl text-[13px] muted">Заказчики платят в два–четыре раза больше рынка. Список обновляется при каждом заходе в порт. Выполнено заказов: <span className="num text-[#ece6d8]">{s.ordersDone}</span></p>
+            <p className="mb-5 max-w-2xl text-[13px] muted">После сбора улова выплата пересчитывается и гарантирует минимум 15% сверх отдельной продажи тех же рыб. Несобранный заказ показывает базовую оплату. Заказы обновляются при заходе в порт. Выполнено: <span className="num text-[#ece6d8]">{s.ordersDone}</span></p>
             <div className="grid gap-3 sm:gap-4 md:grid-cols-3">
               {s.orders.map((o) => {
                 const f = FISH_BY_ID[o.fishId];
@@ -451,6 +451,7 @@ export function PortModal({ engine, onClose, onTravel, onReset, cloud, initialTa
                 const known = !!s.codex[o.fishId];
                 const left = o.expiresDay - engine.day;
                 const ready = have >= o.count;
+                const payout = engine.orderReward(o);
                 return (
                   <div key={o.id} className={`cell flex flex-col p-5 ${ready ? "!border-[rgba(134,180,148,0.45)]" : ""}`}>
                     <div className="flex items-center justify-between"><span className="label">{o.client}</span><span className={`text-[11px] ${left <= 0 ? "text-[var(--color-bad)]" : "dim"}`}>{left <= 0 ? "последний день" : `${left} дн.`}</span></div>
@@ -460,9 +461,9 @@ export function PortModal({ engine, onClose, onTravel, onReset, cloud, initialTa
                     <dl className="mt-3">
                       <Row k="Количество" v={<span className={ready ? "text-[var(--color-ok)]" : ""}>{have} / {o.count}</span>} />
                       {o.minWeight > 0 && <Row k="Масса от" v={fmtW(o.minWeight)} />}
-                      <Row k="Оплата" v={<span className="text-[var(--brass-2,#e3c996)]">{fmt(o.reward)} ₽</span>} strong />
+                      <Row k={ready ? "Оплата · бонус к рынку" : "Базовая оплата"} v={<span className="text-[var(--brass-2,#e3c996)]">{fmt(payout)} ₽</span>} strong />
                     </dl>
-                    <button className="btn btn-solid mt-4 w-full" disabled={!ready} onClick={() => engine.fulfillOrder(o.id) && say(`Заказ сдан: +${fmt(o.reward)} ₽`)}>Сдать заказ</button>
+                    <button className="btn btn-solid mt-4 w-full" disabled={!ready} onClick={() => engine.fulfillOrder(o.id) && say(`Заказ сдан: +${fmt(payout)} ₽`)}>Сдать заказ</button>
                   </div>
                 );
               })}
@@ -643,11 +644,7 @@ export function PortModal({ engine, onClose, onTravel, onReset, cloud, initialTa
                   <div className="text-[13px] text-[#ece6d8]">Сейчас {WEATHER_INFO[s.weather].name.toLowerCase()}. Через ~{Math.max(1, Math.round(fc.inMin / 60))} ч ожидается: {WEATHER_INFO[fc.w].name.toLowerCase()}.</div>
                 </div>
               </div>
-              <button className="btn btn-solid mt-5" disabled={!!engine.restBlock} onClick={() => { if (engine.restUntilDawn()) say("Рассвет. Пахнет морем."); }}>{engine.restBlock ?? `Снять комнату · ${fmt(engine.port.innFee)} ₽`}</button>
-              <div className="rule my-5" />
-              <h3 className="font-serif flex items-center gap-2 text-xl text-[#f1ebdd]"><MiscIcon name="rumor" size={18} className="text-[var(--brass)]" />Слухи у стойки</h3>
-              <p className="mt-1 text-[12px] muted">Старые рыбаки расскажут, где и когда клюёт вид, которого нет в вашем кодексе, — если угостить.</p>
-              <button className="btn btn-sm mt-3" disabled={s.money < engine.rumorPrice} onClick={() => { const f = engine.buyRumor(); say(f ? `Слух: «${f.name}» — заметки добавлены в кодекс` : "Нечего рассказать"); }}>Угостить · {fmt(engine.rumorPrice)} ₽</button>
+              <button className="btn btn-solid mt-5" disabled={!!engine.restBlock} onClick={onRest}>{engine.restBlock ?? `Снять комнату · ${fmt(engine.port.innFee)} ₽`}</button>
             </div>
             <div className="cell p-5 sm:p-6">
               <div className="label">Судовой журнал</div>

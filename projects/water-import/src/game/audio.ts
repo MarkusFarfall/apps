@@ -82,21 +82,41 @@ export class GameAudio {
 
   get ready() { return !!this.ctx; }
 
+  /** Автовоспроизведение оставляет AudioContext приостановленным в части браузеров. */
+  private resumeContext() {
+    const ctx = this.ctx as AudioContext | null;
+    if (!ctx || this.hidden || ctx.state === "running" || typeof ctx.resume !== "function") return;
+    try {
+      // Вызываем resume синхронно из жеста пользователя, не дожидаясь сборки графа.
+      // Некоторые браузеры требуют именно такой порядок для снятия autoplay-блокировки.
+      void ctx.resume().catch(() => {
+        /* Следующий жест пользователя повторит попытку через init(). */
+      });
+    } catch {
+      /* Следующий жест пользователя повторит попытку через init(). */
+    }
+  }
+
   /** Можно передать внешний контекст (для офлайн-проверки) */
   init(ext?: BaseAudioContext) {
     if (this.ctx) {
-      const c = this.ctx as AudioContext;
-      if (c.state === "suspended" && !this.hidden && typeof c.resume === "function") void c.resume();
+      this.resumeContext();
       return;
     }
     let ctx: BaseAudioContext;
     if (ext) ctx = ext;
     else {
-      const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AC) return;
-      ctx = new AC({ latencyHint: "interactive" });
+      try {
+        ctx = new AC({ latencyHint: "interactive" });
+      } catch {
+        // Старые реализации WebKit могут не принимать параметры конструктора.
+        try { ctx = new AC(); } catch { return; }
+      }
     }
     this.ctx = ctx;
+    this.resumeContext();
 
     this.master = ctx.createGain();
     this.master.gain.value = this.volume;
@@ -157,6 +177,9 @@ export class GameAudio {
 
     this.makeNoise();
     this.buildAmbience();
+    // Повторно запрашиваем запуск после сборки графа: браузер мог принять
+    // первый resume до подключения источников, но оставить контекст на паузе.
+    this.resumeContext();
   }
 
   // ─────────── инфраструктура ───────────
@@ -330,9 +353,11 @@ export class GameAudio {
   setHidden(h: boolean) {
     this.hidden = h;
     const c = this.ctx as AudioContext | null;
-    if (!c || typeof c.suspend !== "function") return;
-    if (h) void c.suspend();
-    else if (c.state !== "running") void c.resume();
+    if (!c) return;
+    if (h) {
+      if (typeof c.suspend !== "function") return;
+      try { void c.suspend().catch(() => {}); } catch { /* ignore platform-specific failures */ }
+    } else this.resumeContext();
   }
   get time() { return this.ctx?.currentTime ?? 0; }
   private warned = new Set<string>();
@@ -537,6 +562,11 @@ export class GameAudio {
       case "travel":
         this.osc({ type: "sawtooth", f: 42, f2: 80, g: 0.08, a: 0.3, d: 1.8 });
         this.burst({ buf: this.brown, type: "lowpass", f: 400, g: 0.2, a: 0.4, d: 1.8 });
+        break;
+      case "rest":
+        this.osc({ type: "sine", f: hz(5), f2: hz(3), g: 0.055, a: 0.16, d: 1.8, bus: this.uiBus });
+        this.osc({ type: "sine", f: hz(12), f2: hz(14), g: 0.03, a: 0.2, d: 2.1, at: 0.12, bus: this.uiBus });
+        this.metal(660, [1, 1.5, 2.76], 0.007, 2.4, 0.22, this.uiBus);
         break;
       case "levelUp":
         this.piano(hz(19), 1, 0);

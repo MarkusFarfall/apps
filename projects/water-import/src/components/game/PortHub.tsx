@@ -12,7 +12,7 @@ const LABELS: Record<Building, { name: string; sub: string }> = {
   market: { name: "Рынок", sub: "продать улов" },
   shop: { name: "Лавка снастей", sub: "снаряжение и наживка" },
   shipyard: { name: "Верфь", sub: "суда" },
-  tavern: { name: "Таверна", sub: "ночлег и слухи" },
+  tavern: { name: "Таверна", sub: "ночлег и покой" },
 };
 
 function BuildingIcon({ b, size = 18 }: { b: Building | "sea" | "orders"; size?: number }) {

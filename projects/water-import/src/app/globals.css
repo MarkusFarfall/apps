@@ -824,3 +824,232 @@ input {
     animation: none !important;
   }
 }
+
+/* ───── короткая ночёвка в таверне ───── */
+.rest-transition {
+  isolation: isolate;
+  background: #040713;
+  color: #f2e9d5;
+  animation: restFadeIn 0.2s ease-out both;
+}
+.rest-sky,
+.rest-daylight {
+  position: absolute;
+  inset: 0;
+}
+.rest-sky {
+  z-index: 0;
+  background: linear-gradient(180deg, #030714 0%, #10172d 42%, #28233f 67%, #573a50 100%);
+}
+.rest-daylight {
+  z-index: 1;
+  opacity: 0;
+  background:
+    radial-gradient(ellipse 48% 32% at 50% 57%, rgba(247, 169, 119, 0.72), transparent 72%),
+    linear-gradient(180deg, rgba(45, 50, 83, 0.1), rgba(130, 74, 91, 0.2) 50%, rgba(236, 143, 105, 0.7));
+  animation: restDawn 2.6s ease-in-out both;
+}
+.rest-stars {
+  position: absolute;
+  z-index: 2;
+  inset: 7% 8% 42%;
+  opacity: 0.7;
+  animation: restStarsFade 2.6s ease-out both;
+}
+.rest-stars span {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: #f4e6ca;
+  box-shadow: 0 0 7px rgba(244, 230, 202, 0.7);
+}
+.rest-stars span:nth-child(1) { left: 9%; top: 18%; }
+.rest-stars span:nth-child(2) { left: 21%; top: 54%; width: 1px; height: 1px; }
+.rest-stars span:nth-child(3) { left: 31%; top: 29%; }
+.rest-stars span:nth-child(4) { left: 42%; top: 62%; width: 1px; height: 1px; }
+.rest-stars span:nth-child(5) { left: 57%; top: 19%; width: 1px; height: 1px; }
+.rest-stars span:nth-child(6) { left: 68%; top: 48%; }
+.rest-stars span:nth-child(7) { left: 78%; top: 15%; width: 1px; height: 1px; }
+.rest-stars span:nth-child(8) { left: 91%; top: 42%; }
+.rest-stars span:nth-child(9) { left: 15%; top: 78%; width: 1px; height: 1px; }
+.rest-stars span:nth-child(10) { left: 37%; top: 82%; }
+.rest-stars span:nth-child(11) { left: 73%; top: 77%; width: 1px; height: 1px; }
+.rest-stars span:nth-child(12) { left: 86%; top: 67%; }
+.rest-stars span:nth-child(13) { left: 51%; top: 42%; width: 1px; height: 1px; }
+.rest-stars span:nth-child(14) { left: 4%; top: 57%; width: 1px; height: 1px; }
+.rest-sun {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: 41%;
+  width: clamp(62px, 9vw, 96px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, #ffe3a9 0%, #f5b879 42%, #e9896f 76%, #da786b 100%);
+  box-shadow: 0 0 30px 9px rgba(239, 155, 113, 0.24), 0 0 100px 35px rgba(228, 123, 109, 0.18);
+  transform: translate(-50%, 0);
+  animation: restSunRise 2.6s cubic-bezier(0.2, 0.66, 0.25, 1) both;
+}
+.rest-water {
+  position: absolute;
+  z-index: 3;
+  top: 58%;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  overflow: hidden;
+  background: linear-gradient(180deg, #163445 0%, #0b2636 27%, #071522 100%);
+}
+.rest-water::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  opacity: 0.2;
+  background: repeating-linear-gradient(177deg, transparent 0 18px, rgba(178, 203, 201, 0.22) 19px, transparent 20px 39px);
+  animation: restWaterDrift 2.6s linear both;
+}
+.rest-water::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  opacity: 0;
+  background: linear-gradient(180deg, rgba(242, 160, 121, 0.35), rgba(214, 137, 123, 0.12) 20%, transparent 75%);
+  animation: restWaterLight 2.6s ease-in-out both;
+}
+.rest-reflection {
+  position: absolute;
+  z-index: 1;
+  top: -24px;
+  left: 50%;
+  width: min(38vw, 360px);
+  height: 110%;
+  transform: translateX(-50%);
+  opacity: 0;
+  background: linear-gradient(180deg, rgba(255, 211, 154, 0.44), rgba(241, 174, 140, 0.14) 42%, transparent 90%);
+  clip-path: polygon(47% 0, 53% 0, 100% 100%, 0 100%);
+  animation: restReflection 2.6s ease-in-out both;
+}
+.rest-boat {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  bottom: 31%;
+  width: min(360px, 56vw);
+  filter: drop-shadow(0 8px 10px rgba(0, 0, 0, 0.45));
+  transform: translateX(-50%);
+  animation: restBoatFloat 2.6s ease-in-out both;
+}
+.rest-caption {
+  position: absolute;
+  z-index: 6;
+  top: 23%;
+  left: 24px;
+  right: 24px;
+  text-align: center;
+  animation: restCaption 2.6s ease-out both;
+}
+.rest-caption h2 {
+  margin-top: 10px;
+  font-size: clamp(42px, 7vw, 76px);
+  font-weight: 400;
+  line-height: 0.98;
+  color: #f4eee0;
+  text-shadow: 0 2px 28px rgba(8, 11, 23, 0.45);
+}
+.rest-caption p {
+  margin-top: 12px;
+  color: rgba(239, 228, 211, 0.7);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.rest-footer {
+  position: absolute;
+  z-index: 7;
+  right: 22px;
+  bottom: max(22px, env(safe-area-inset-bottom));
+  left: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  opacity: 0;
+  color: rgba(240, 222, 195, 0.72);
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  animation: restFooter 2.6s ease-out both;
+}
+.rest-footer i {
+  width: min(24vw, 180px);
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(226, 184, 137, 0.55), transparent);
+}
+@keyframes restFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes restDawn {
+  0% { opacity: 0; }
+  46% { opacity: 0.16; }
+  100% { opacity: 0.88; }
+}
+@keyframes restStarsFade {
+  0% { opacity: 0.72; }
+  52% { opacity: 0.44; }
+  100% { opacity: 0; }
+}
+@keyframes restSunRise {
+  0% { transform: translate(-50%, 115px) scale(0.82); }
+  100% { transform: translate(-50%, 0) scale(1); }
+}
+@keyframes restWaterDrift {
+  from { transform: translateX(-14px); }
+  to { transform: translateX(14px); }
+}
+@keyframes restWaterLight {
+  0% { opacity: 0; }
+  100% { opacity: 0.64; }
+}
+@keyframes restReflection {
+  0% { opacity: 0; transform: translateX(-50%) scaleX(0.55); }
+  100% { opacity: 0.75; transform: translateX(-50%) scaleX(1); }
+}
+@keyframes restBoatFloat {
+  0% { transform: translateX(calc(-50% - 7px)) translateY(6px) rotate(-0.7deg); }
+  55% { transform: translateX(calc(-50% + 4px)) translateY(-2px) rotate(0.35deg); }
+  100% { transform: translateX(-50%) translateY(0) rotate(0); }
+}
+@keyframes restCaption {
+  0%, 18% { opacity: 0; transform: translateY(10px); }
+  48%, 100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes restFooter {
+  0%, 62% { opacity: 0; }
+  100% { opacity: 0.86; }
+}
+@media (max-width: 640px) {
+  .rest-caption { top: 25%; }
+  .rest-caption p { font-size: 10px; }
+  .rest-boat { width: min(300px, 76vw); bottom: 29%; }
+  .rest-reflection { width: 64vw; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rest-transition,
+  .rest-daylight,
+  .rest-stars,
+  .rest-sun,
+  .rest-water::before,
+  .rest-water::after,
+  .rest-reflection,
+  .rest-boat,
+  .rest-caption,
+  .rest-footer {
+    animation: none !important;
+  }
+  .rest-daylight { opacity: 0.88; }
+  .rest-stars { opacity: 0; }
+  .rest-reflection { opacity: 0.75; transform: translateX(-50%); }
+  .rest-caption { opacity: 1; transform: none; }
+  .rest-footer { opacity: 0.86; }
+}
