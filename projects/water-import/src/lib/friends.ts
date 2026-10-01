@@ -5,7 +5,7 @@ import { catches, friendships, players, saves, users } from "@/db/schema";
 import { isClean } from "@/lib/auth";
 import { PORT_BY_ID, SPOT_BY_ID, WEATHER_INFO } from "@/game/world";
 import {
-  FRIEND_LIMIT, PENDING_OUT_LIMIT, SEARCH_RESULTS, isValidUserId, locOf, normalizeQuery, pairOf,
+  FRIEND_LIMIT, INCOMING_LIMIT, PENDING_OUT_LIMIT, SEARCH_RESULTS, isValidUserId, locOf, normalizeQuery, pairOf,
   type FriendCatch, type FriendProfile, type FriendRequestRow, type FriendSummary, type FriendWhere,
   type FriendsOverview, type SearchResult,
 } from "@/game/friends";
@@ -60,7 +60,9 @@ const OTHER_JOIN = (me: string) =>
 
 function whereOf(r: Row): FriendWhere | null {
   const hidden = !!r.hideLocation;
-  if (!r.location && !r.port && hidden) return null;
+  // Скрывший местоположение должен выглядеть скрывшимся, даже если ещё ни разу не сохранялся:
+  // иначе друг видел «ещё не выходил в море» вместо «скрыл местоположение».
+  if (!r.location && !r.port && !hidden) return null;
   return {
     location: hidden ? null : (locOf(r.location)?.id as LocId | null) ?? null,
     locationName: hidden ? null : locOf(r.location)?.name ?? null,
@@ -192,6 +194,12 @@ export async function requestFriend(me: string, rawUsername: unknown): Promise<F
   const other = target[0].id;
   if (other === me) return { ok: false, status: 400, error: "Себя добавить нельзя" };
 
+  // У получателя тоже есть предел: иначе заявки с чужих аккаунтов заваливали ему список.
+  const incoming = await countByStatus(other, "pending", false);
+  if (incoming >= INCOMING_LIMIT) {
+    return { ok: false, status: 409, error: "У игрока слишком много неотвеченных заявок — попробуйте позже" };
+  }
+
   const existing = await findPair(me, other);
   if (existing) {
     if (existing.status === "accepted") return { ok: false, status: 409, error: "Вы уже друзья" };
@@ -257,6 +265,19 @@ export async function setHideLocation(me: string, hide: boolean): Promise<Friend
     if (!p[0]) return { ok: false, status: 404, error: "Профиль не найден" };
   }
   return { ok: true };
+}
+
+/** Отклонить все входящие заявки разом. */
+export async function clearIncoming(me: string): Promise<FriendResult> {
+  const res = await db
+    .delete(friendships)
+    .where(and(
+      or(eq(friendships.aUserId, me), eq(friendships.bUserId, me)),
+      eq(friendships.status, "pending"),
+      sql`${friendships.requestedBy} <> ${me}`,
+    ))
+    .returning({ id: friendships.id });
+  return res.length ? { ok: true, message: `Отклонено заявок: ${res.length}` } : { ok: true };
 }
 
 // ─────────── поиск ───────────

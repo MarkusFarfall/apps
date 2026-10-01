@@ -554,13 +554,19 @@ export function FriendsModal({ state, onClose, onUi, me }: { state: FriendsState
               <div>
                 <div className="label mb-2">Входящие{incoming.length ? ` · ${incoming.length}` : ""}</div>
                 {incoming.length === 0 ? <div className="text-[12px] dim">Новых заявок нет.</div> : (
-                  <div className="space-y-2">
-                    {incoming.map((r) => (
-                      <RequestCard key={r.userId} r={r} onUi={() => onUi()}
-                        onAccept={() => void act("accept", { userId: r.userId }, `${r.username} теперь в друзьях`)}
-                        onDecline={() => void act("decline", { userId: r.userId }, "Заявка отклонена")} />
-                    ))}
-                  </div>
+                  <>
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <div className="text-[11px] dim">Заявки без ответа копятся: чужие аккаунты могут завалить список.</div>
+                      <button className="btn btn-sm btn-quiet shrink-0" disabled={busy} onClick={() => { onUi(); void act("clear", {}, "Все входящие заявки отклонены"); }}>Отклонить все</button>
+                    </div>
+                    <div className="space-y-2">
+                      {incoming.map((r) => (
+                        <RequestCard key={r.userId} r={r} onUi={() => onUi()}
+                          onAccept={() => void act("accept", { userId: r.userId }, `${r.username} теперь в друзьях`)}
+                          onDecline={() => void act("decline", { userId: r.userId }, "Заявка отклонена")} />
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
               <div>

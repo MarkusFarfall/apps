@@ -116,6 +116,11 @@ try {
       label: 'приватность в players (скрыть своё местоположение от друзей)',
       sql: `alter table public.players add column if not exists hide_location boolean not null default false;`,
     },
+    {
+      label: 'ключ идемпотентности уловов (повторная отправка не задваивает запись)',
+      sql: `alter table public.catches add column if not exists cid varchar(40);
+            create unique index if not exists catches_cid_uq on public.catches (cid);`,
+    },
   ];
   for (const a of alters) {
     await client.query(a.sql);
@@ -133,7 +138,7 @@ try {
     sessions: ['id', 'user_id', 'created_at', 'expires_at', 'user_agent'],
     players: ['id', 'user_id', 'name', 'created_at', 'last_seen_at', 'hide_location'],
     saves: ['player_id', 'data', 'version', 'money', 'codex_count', 'total_caught', 'play_seconds', 'level', 'achievements', 'location', 'spot', 'port', 'at_port', 'weather', 'boat', 'game_day', 'updated_at'],
-    catches: ['id', 'player_id', 'fish_id', 'weight', 'variant', 'location_id', 'game_day', 'created_at'],
+    catches: ['id', 'player_id', 'fish_id', 'weight', 'variant', 'location_id', 'game_day', 'created_at', 'cid'],
     rate_limits: ['key', 'count', 'reset_at'],
     friendships: ['id', 'a_user_id', 'b_user_id', 'requested_by', 'status', 'created_at', 'updated_at', 'accepted_at'],
   };

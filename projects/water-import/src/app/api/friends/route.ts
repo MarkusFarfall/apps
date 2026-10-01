@@ -1,6 +1,6 @@
 import { currentUser, rateLimit } from "@/lib/auth";
 import { body, dbError, fail, json, sameOrigin } from "@/lib/http";
-import { acceptFriend, friendsOverview, removeRelation, requestFriend, setHideLocation } from "@/lib/friends";
+import { acceptFriend, clearIncoming, friendsOverview, removeRelation, requestFriend, setHideLocation } from "@/lib/friends";
 import type { FriendAction } from "@/game/friends";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export async function GET() {
 /**
  * Все действия с друзьями одним маршрутом:
  * `request` (по имени), `accept`, `decline`, `cancel`, `remove` (по идентификатору),
- * `privacy` (скрыть/показать своё местоположение).
+ * `clear` (отклонить все входящие), `privacy` (скрыть/показать своё местоположение).
  */
 export async function POST(req: Request) {
   if (!sameOrigin(req)) return fail("forbidden", 403);
@@ -47,6 +47,10 @@ export async function POST(req: Request) {
       case "remove": {
         const r = await removeRelation(me.id, b.userId);
         return r.ok ? json({ ok: true }) : fail(r.error, r.status);
+      }
+      case "clear": {
+        const r = await clearIncoming(me.id);
+        return r.ok ? json({ ok: true, message: r.message }) : fail(r.error, r.status);
       }
       case "privacy": {
         const r = await setHideLocation(me.id, !!b.hideLocation);

@@ -47,6 +47,12 @@ on:
     paths:
       - "projects/water-import/**"
       - ".github/workflows/water-production.yml"
+  # На запросе на слияние прогон тот же, но без деплоя: деплой включается
+  # только ручным запуском (workflow_dispatch + inputs.deploy).
+  pull_request:
+    paths:
+      - "projects/water-import/**"
+      - ".github/workflows/water-production.yml"
 
 concurrency:
   group: water-production
@@ -60,6 +66,22 @@ jobs:
     name: База и деплой
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # Тестовая база: на ней проверяется миграция и круг данных
+    # (tests/db.test.ts). Боевая база для этого не нужна — секрета DATABASE_URL здесь не при чём.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: zv_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       WORKDIR: projects/water-import
       HOWTO: "Settings → Secrets and variables → Actions → New repository secret"
@@ -70,6 +92,7 @@ jobs:
       VERCEL_PROJECT: ${{ vars.VERCEL_PROJECT || 'water-import' }}
       VERCEL_SCOPE: ${{ vars.VERCEL_SCOPE }}
       SITE_URL: ${{ vars.SITE_URL }}
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/zv_test
       DEPLOY: ${{ (github.event_name == 'workflow_dispatch' && inputs.deploy) || 'false' }}
       RUN_SMOKE: ${{ github.event_name != 'workflow_dispatch' || inputs.smoke }}
 
@@ -109,12 +132,13 @@ jobs:
           fi
 
       - name: Зависимости проекта
-        if: steps.preflight.outputs.has_db == 'true'
         working-directory: projects/water-import
         run: npm ci --no-audit --no-fund
 
-      - name: Типы и стиль кода
-        if: steps.preflight.outputs.has_db == 'true'
+      - name: Схема на тестовой базе
+        run: DATABASE_URL="$TEST_DATABASE_URL" node "$WORKDIR/scripts/db-migrate.mjs"
+
+      - name: Типы, стиль и тесты (включая проверку базы)
         working-directory: projects/water-import
         run: |
           npm run typecheck
@@ -230,8 +254,9 @@ jobs:
             else
               echo "- Деплой не выполнялся (нет VERCEL_TOKEN или выключен входной параметр deploy)"
             fi
+            echo "- Тестовая база: миграция и круг данных проверены"
             if [ "${{ steps.preflight.outputs.has_db }}" = "true" ]; then
-              echo "- База: схема и политики доступа применены"
+              echo "- Боевая база: схема и политики доступа применены"
             else
               echo "- База: секрет DATABASE_URL не задан — шаг пропущен"
             fi

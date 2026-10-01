@@ -6,7 +6,8 @@ CREATE TABLE "catches" (
 	"variant" varchar(24),
 	"location_id" varchar(32) NOT NULL,
 	"game_day" integer DEFAULT 1 NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"cid" varchar(40)
 );
 
 CREATE TABLE "players" (
@@ -63,6 +64,7 @@ ALTER TABLE "saves" ADD CONSTRAINT "saves_player_id_players_id_fk" FOREIGN KEY (
 ALTER TABLE "sessions" ADD CONSTRAINT "sessions_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
 CREATE INDEX "catches_fish_idx" ON "catches" USING btree ("fish_id","weight");
 CREATE INDEX "catches_player_idx" ON "catches" USING btree ("player_id");
+CREATE UNIQUE INDEX "catches_cid_uq" ON "catches" USING btree ("cid");
 CREATE UNIQUE INDEX "players_user_uq" ON "players" USING btree ("user_id");
 CREATE INDEX "saves_codex_idx" ON "saves" USING btree ("codex_count");
 CREATE INDEX "saves_location_idx" ON "saves" USING btree ("location");

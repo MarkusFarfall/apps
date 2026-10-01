@@ -100,8 +100,17 @@ export const catches = pgTable(
     locationId: varchar("location_id", { length: 32 }).notNull(),
     gameDay: integer("game_day").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Ключ улова, придуманный клиентом. Уловы отправляются повторно при обрыве связи,
+     * поэтому повтор не должен задваивать строку в журнале уловов.
+     */
+    cid: varchar("cid", { length: 40 }),
   },
-  (t) => [index("catches_fish_idx").on(t.fishId, t.weight), index("catches_player_idx").on(t.playerId)],
+  (t) => [
+    index("catches_fish_idx").on(t.fishId, t.weight),
+    index("catches_player_idx").on(t.playerId),
+    uniqueIndex("catches_cid_uq").on(t.cid),
+  ],
 );
 
 /**

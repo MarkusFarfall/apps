@@ -29,8 +29,12 @@ export async function DELETE(req: Request) {
     const u = await currentUser();
     if (!u) return fail("Требуется вход", 401);
     if (!(await verifyPassword(String(b?.password ?? ""), u.passwordHash))) return fail("Неверный пароль", 401);
-    await db.delete(players).where(eq(players.userId, u.id));
-    await db.delete(users).where(eq(users.id, u.id));
+    // Одной транзакцией: каскад по players уже сносит сохранения, уловы и дружбу,
+    // и если второй запрос не выполнился бы, аккаунт остался бы без прогресса.
+    await db.transaction(async (tx) => {
+      await tx.delete(players).where(eq(players.userId, u.id));
+      await tx.delete(users).where(eq(users.id, u.id));
+    });
     await destroySession();
     return json({ ok: true });
   } catch (e) {

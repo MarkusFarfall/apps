@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import { createSession, hashPassword, newUserId, playerForUser, rateLimit, toPublic, validatePassword, validateUsername } from "@/lib/auth";
+import { applySessionCookie, hashPassword, newSessionRow, newUserId, playerForUser, rateLimit, toPublic, validatePassword, validateUsername } from "@/lib/auth";
 import { body, dbError, fail, json, sameOrigin } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -22,13 +22,20 @@ export async function POST(req: Request) {
     const taken = await db.select({ id: users.id }).from(users).where(eq(users.usernameLower, lower)).limit(1);
     if (taken[0]) return fail("Это имя уже занято", 409);
     const id = newUserId();
-    const [u] = await db
-      .insert(users)
-      .values({ id, username, usernameLower: lower, passwordHash: await hashPassword(password), lastLoginAt: new Date() })
-      .returning();
-    const playerId = await playerForUser(id, username);
-    await createSession(id);
-    return json({ user: toPublic(u), playerId }, 201);
+    // Аккаунт и профиль создаются одной транзакцией: раньше при сбое на середине
+    // оставалась учётная запись без профиля, и следующий вход заводил второй.
+    const created = await db.transaction(async (tx) => {
+      const [u] = await tx
+        .insert(users)
+        .values({ id, username, usernameLower: lower, passwordHash: await hashPassword(password), lastLoginAt: new Date() })
+        .returning();
+      const playerId = await playerForUser(u.id, u.username, tx);
+      return { user: u, playerId };
+    });
+    // Cookie — только после успешной транзакции, иначе сессии не будет в базе.
+    const { token, expires } = await newSessionRow(created.user.id);
+    await applySessionCookie(token, expires);
+    return json({ user: toPublic(created.user), playerId: created.playerId }, 201);
   } catch (e) {
     const msg = String((e as { message?: string })?.message ?? "");
     if (msg.includes("users_username_lower_uq")) return fail("Это имя уже занято", 409);
