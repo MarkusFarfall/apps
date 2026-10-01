@@ -120,6 +120,11 @@ jobs:
           npm run typecheck
           npm run lint
 
+      - name: Экономика улова
+        if: steps.preflight.outputs.has_db == 'true'
+        working-directory: projects/water-import
+        run: npm run prices
+
       - name: Схема и политики доступа в базе
         if: steps.preflight.outputs.has_db == 'true'
         run: node "$WORKDIR/scripts/db-migrate.mjs"

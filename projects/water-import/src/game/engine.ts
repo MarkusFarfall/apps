@@ -900,7 +900,8 @@ export class Engine {
   private registerCatch(h: Hooked) {
     const f = h.fish;
     const mult = h.variant ? VARIANT_INFO[h.variant].mult : 1;
-    const value = Math.max(1, Math.round(h.weight * f.price * mult));
+    // Ставка за рыбу плюс вес по цене вида: даже мелкий бычок стоит своих денег.
+    const value = Math.max(1, Math.round((RARITY_INFO[f.rarity].base + h.weight * f.price) * mult));
     const item: CaughtFish = { uid: rid(), fishId: f.id, weight: h.weight, variant: h.variant, value, day: this.day, loc: this.s.location, at: this.s.minutes };
     const entry = this.s.codex[f.id];
     const isNew = !entry;
@@ -1389,7 +1390,13 @@ export class Engine {
   /** Ярмарка по реальным выходным: +10% к ценам (кроме полярной станции) */
   get fairBonus() { const d = new Date().getDay(); return (d === 0 || d === 6) && this.s.port !== "southcross" ? 1.1 : 1; }
   marketMult(fishId: string, extra = 0) { return this.fairBonus * priceMult(fishId, this.day) * (this.hot.includes(fishId) ? 1.8 : 1) * this.saturation(fishId, extra) * this.demand(fishId); }
-  marketValue(c: CaughtFish, extra = 0) { return Math.max(1, Math.round(c.value * this.marketMult(c.fishId, extra) * this.freshness(c) * (1 + this.perk("trader") * 0.04))); }
+  /** Ставка за одну рыбу вида: ниже неё рынок не опускается никогда. */
+  baseValue(fishId: string) { const f = FISH_BY_ID[fishId]; return f ? RARITY_INFO[f.rarity].base : 1; }
+  marketValue(c: CaughtFish, extra = 0) {
+    const raw = c.value * this.marketMult(c.fishId, extra) * this.freshness(c) * (1 + this.perk("trader") * 0.04);
+    // Перегруженный рынок и лежалый улов сбивают цену, но не ниже ставки за вид.
+    return Math.max(this.baseValue(c.fishId), Math.round(raw));
+  }
   /** Цены всего садка с учётом того, что каждая следующая рыба вида дешевле */
   coolerQuote() {
     const cnt: Record<string, number> = {};
@@ -1459,7 +1466,7 @@ export class Engine {
     const minWeight = Math.random() < 0.4 ? +(f.weight[0] + (f.weight[1] - f.weight[0]) * (0.25 + Math.random() * 0.3)).toFixed(2) : 0;
     const avgW = minWeight ? minWeight * 1.2 : ((f.weight[0] + f.weight[1]) / 2) * 0.7;
     const mult = { common: 2.2, uncommon: 2.5, rare: 3, epic: 3.5, legendary: 4 }[f.rarity];
-    const reward = Math.max(50, Math.round((avgW * f.price * count * mult + 40) / 10) * 10);
+    const reward = Math.max(50, Math.round(((RARITY_INFO[f.rarity].base + avgW * f.price) * count * mult + 40) / 10) * 10);
     return { id: rid(), fishId: f.id, count, minWeight, reward, expiresDay: this.day + 2 + ri(3), client: this.port.clients[ri(this.port.clients.length)] ?? ORDER_CLIENTS[ri(ORDER_CLIENTS.length)] };
   }
 
