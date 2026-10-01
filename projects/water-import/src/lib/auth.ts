@@ -73,13 +73,37 @@ export function validatePassword(raw: unknown): string | { error: string } {
 }
 
 // ─────────── ограничение частоты ───────────
+/**
+ * IP клиента для счётчиков.
+ *
+ * Берём ПОСЛЕДНИЙ элемент `x-forwarded-for`, а не первый. Первый — это то, что
+ * прислал клиент: если перед приложением когда-нибудь встанет свой nginx или CDN
+ * с `proxy_add_x_forwarded_for`, лимиты обойдутся одним заголовком с разным
+ * значением на каждый запрос. На Vercel платформа перезаписывает `x-forwarded-for`
+ * адресом клиента, поэтому последний элемент — это и есть он. Если списка нет
+ * (локальный запуск, прямой доступ), запасной вариант — `x-real-ip`.
+ */
+function clientIp(h: Headers): string {
+  const fwd = (h.get("x-forwarded-for") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return (fwd.at(-1) ?? h.get("x-real-ip")?.trim() ?? "local").slice(0, 64);
+}
+
 // Счётчики живут в базе: раньше они лежали в памяти инстанса и обнулялись на каждом
 // холодном старте, а между параллельными лямбдами вообще не разделялись — то есть
 // защита от перебора работала лишь частично. Теперь окно общее для всего прода.
-export async function rateLimit(scope: string, limit: number, windowMs: number) {
+/**
+ * Счётчик попыток. Окно общее для всего прода, ключ — `scope:кто`.
+ *
+ * По умолчанию «кто» — IP клиента. Но IP одного аккаунта не ограничивает:
+ * адрес меняется на каждый запрос (мобильная сеть, пул прокси), поэтому перебор
+ * пароля одной учётной записи упирается только в тот предел, который можно
+ * обойти ротацией адресов. Для таких мест передавайте `identity` — тогда ключ
+ * привязывается к самой цели (например, к хешу логина), а не к источнику.
+ */
+export async function rateLimit(scope: string, limit: number, windowMs: number, identity?: string) {
   const h = await headers();
-  const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || h.get("x-real-ip") || "local";
-  const key = `${scope}:${ip}`.slice(0, 190);
+  const who = identity ?? clientIp(h);
+  const key = `${scope}:${who}`.slice(0, 190);
   try {
     const res = await db.execute(sql`
       insert into rate_limits (key, count, reset_at)
@@ -113,15 +137,28 @@ async function secureCookie() {
   return proto === "https" || (process.env.NODE_ENV === "production" && !host.startsWith("localhost") && !host.startsWith("127.0.0.1"));
 }
 
-export async function createSession(userId: string) {
+/** Куда можно выполнять запрос: и обычный `db`, и участник транзакции. */
+type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Новая сессия в базе. Cookie выставляет отдельно — см. applySessionCookie. */
+export async function newSessionRow(userId: string, executor: Executor = db) {
   const token = randomBytes(32).toString("base64url");
   const expires = new Date(Date.now() + SESSION_DAYS * 864e5);
   const ua = ((await headers()).get("user-agent") ?? "").slice(0, 200);
-  await db.insert(sessions).values({ id: tokenHash(token), userId, expiresAt: expires, userAgent: ua });
+  await executor.insert(sessions).values({ id: tokenHash(token), userId, expiresAt: expires, userAgent: ua });
+  return { token, expires };
+}
+
+/** Cookie сессии и уборка просроченных. Вызывать после успешной транзакции. */
+export async function applySessionCookie(token: string, expires: Date) {
   const jar = await cookies();
   jar.set(SESSION_COOKIE, token, { httpOnly: true, sameSite: "lax", secure: await secureCookie(), path: "/", expires });
-  // уборка просроченных
   db.delete(sessions).where(lt(sessions.expiresAt, new Date())).catch(() => {});
+}
+
+export async function createSession(userId: string) {
+  const { token, expires } = await newSessionRow(userId);
+  await applySessionCookie(token, expires);
 }
 
 export async function destroySession() {
@@ -162,18 +199,31 @@ export const toPublic = (u: { id: string; username: string; createdAt: string | 
   createdAt: typeof u.createdAt === "string" ? u.createdAt : u.createdAt.toISOString(),
 });
 
-/** Игровой профиль пользователя; при отсутствии создаётся */
-export async function playerForUser(userId: string, name?: string): Promise<string> {
-  const own = await db.select({ id: players.id }).from(players).where(eq(players.userId, userId)).limit(1);
+/**
+ * Игровой профиль пользователя; при отсутствии создаётся.
+ *
+ * Вставка идёт с `onConflictDoNothing` по владельцу: два одновременных входа
+ * (телефон и ноут, либо регистрация и сразу `/api/auth/me`) раньше упирались в
+ * уникальный индекс `players_user_uq`, и один из запросов отвечал 503.
+ */
+export async function playerForUser(userId: string, name?: string, executor: Executor = db): Promise<string> {
+  const own = await executor.select({ id: players.id }).from(players).where(eq(players.userId, userId)).limit(1);
   if (own[0]) return own[0].id;
   const id = `u-${randomUUID()}`;
-  await db.insert(players).values({ id, userId, name: name ?? "Рыбак" });
-  return id;
+  await executor
+    .insert(players)
+    .values({ id, userId, name: name ?? "Рыбак" })
+    .onConflictDoNothing({ target: players.userId });
+  const again = await executor.select({ id: players.id }).from(players).where(eq(players.userId, userId)).limit(1);
+  if (again[0]) return again[0].id;
+  throw new Error("player_for_user_failed");
 }
 
 export const newUserId = () => `usr_${randomUUID().replace(/-/g, "")}`;
 
-export type PlayerAccess = { ok: true; exists: true } | { ok: false; status: number; error: string };
+export type PlayerAccess =
+  | { ok: true; exists: true; userId: string; createdAt: string }
+  | { ok: false; status: number; error: string };
 
 /** Можно ли текущему запросу читать/писать данные игрока.
  *  Гостевого режима нет: профиль принадлежит аккаунту, и трогать его может только он. */
@@ -184,5 +234,5 @@ export async function checkPlayerAccess(playerId: string): Promise<PlayerAccess>
   if (!p || !p.userId) return { ok: false, status: 403, error: "forbidden" };
   const u = await currentUser();
   if (!u || u.id !== p.userId) return { ok: false, status: 401, error: "Требуется вход в аккаунт" };
-  return { ok: true, exists: true };
+  return { ok: true, exists: true, userId: p.userId, createdAt: u.createdAt };
 }

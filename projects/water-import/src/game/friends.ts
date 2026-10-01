@@ -12,12 +12,17 @@ import type { BoatDef, LocId, PortId, WeatherId } from "./types";
 // ─────────── пределы и окна ───────────
 export const FRIEND_LIMIT = 50;
 export const PENDING_OUT_LIMIT = 20;
+/**
+ * Предел неотвеченных ВХОДЯЩИХ заявок. Без него аккаунт с десятком «пустышек»
+ * заваливал чужой список друзей, и легитимные заявки выдавливались из выборки.
+ */
+export const INCOMING_LIMIT = 100;
 /** «В игре сейчас» — если профиль сохранялся не дольше этого окна назад. */
 export const ONLINE_WINDOW_MS = 5 * 60_000;
 export const SEARCH_MIN = 2;
 export const SEARCH_RESULTS = 8;
 
-export type FriendAction = "request" | "accept" | "decline" | "cancel" | "remove" | "privacy";
+export type FriendAction = "request" | "accept" | "decline" | "cancel" | "remove" | "clear" | "privacy";
 
 /** Последняя известная точка друга: снимок мира из таблицы saves. */
 export interface FriendWhere {

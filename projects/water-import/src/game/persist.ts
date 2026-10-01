@@ -111,8 +111,71 @@ export async function deleteRemote(pid: string) {
   await req(`/api/save?playerId=${encodeURIComponent(pid)}`, { method: "DELETE" });
 }
 
+/**
+ * Очередь уловов.
+ *
+ * Улов отправляется сразу, но если сети нет (игра же работает офлайн), он остаётся в очереди и уйдёт позже.
+ * Раньше такой улов просто терялся: мировой рекорд не ставился, а «лучшие уловы» в профиле друга были неполными.
+ * Повторная отправка не задваивает строку: у улова есть свой ключ `cid`.
+ */
+const queueKey = "zv_catch_queue:v1";
+const QUEUE_CAP = 200;
+const QUEUE_TTL_MS = 7 * 86_400_000;
+
+interface QueuedCatch extends CaughtFish { pid: string; cid: string; queuedAt: number }
+
+const newCid = () => {
+  const c = globalThis.crypto;
+  if (c && typeof c.randomUUID === "function") return c.randomUUID().replace(/-/g, "");
+  return `${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+};
+
+function readQueue(): QueuedCatch[] {
+  try {
+    const raw = localStorage.getItem(queueKey);
+    const v = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(v)) return [];
+    return v.filter((x): x is QueuedCatch => !!x && typeof x.cid === "string" && typeof x.fishId === "string" && typeof x.pid === "string");
+  } catch {
+    return [];
+  }
+}
+
+function writeQueue(q: QueuedCatch[]) {
+  try {
+    localStorage.setItem(queueKey, JSON.stringify(q.slice(-QUEUE_CAP)));
+  } catch {
+    /* квота */
+  }
+}
+
 export function logCatch(pid: string, c: CaughtFish) {
-  void req("/api/catches", { method: "POST", body: JSON.stringify({ playerId: pid, fishId: c.fishId, weight: c.weight, variant: c.variant, locationId: c.loc, gameDay: c.day }) });
+  const item: QueuedCatch = { ...c, pid, cid: newCid(), queuedAt: Date.now() };
+  writeQueue([...readQueue(), item]);
+  void flushCatches(pid);
+}
+
+/** Отправляет накопившиеся уловы. `pid` — чью очередь сейчас разгружаем. */
+export async function flushCatches(pid?: string): Promise<number> {
+  const now = Date.now();
+  const queue = readQueue().filter((x) => now - x.queuedAt < QUEUE_TTL_MS);
+  if (!queue.length) return 0;
+  const rest: QueuedCatch[] = [];
+  let sent = 0;
+  for (const item of queue) {
+    if (pid && item.pid !== pid) {
+      rest.push(item);
+      continue;
+    }
+    const r = await req<{ ok?: boolean }>("/api/catches", {
+      method: "POST",
+      body: JSON.stringify({ playerId: item.pid, fishId: item.fishId, weight: item.weight, variant: item.variant ?? null, locationId: item.loc, gameDay: item.day, cid: item.cid }),
+    });
+    if (r.ok) sent++;
+    else rest.push(item);
+  }
+  writeQueue(rest);
+  return sent;
 }
 
 export function pickNewest(a: SaveData | null | undefined, b: SaveData | null | undefined): SaveData | null {

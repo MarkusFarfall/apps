@@ -13,7 +13,7 @@ export async function POST(req: Request) {
   const limited = await rateLimit("catch", 40, 60_000);
   if (limited === null) return fail("Сервер временно недоступен", 503);
   if (!limited) return fail("slow down", 429);
-  const b = await body<{ playerId?: string; fishId?: string; weight?: number; variant?: string | null; locationId?: string; gameDay?: number }>(req);
+  const b = await body<{ playerId?: string; fishId?: string; weight?: number; variant?: string | null; locationId?: string; gameDay?: number; cid?: string }>(req);
   if (!b?.playerId || !b.fishId || typeof b.weight !== "number" || !b.locationId) return fail("bad payload");
   const f = FISH_BY_ID[b.fishId];
   // вес не может превышать максимум вида (с запасом на трофеи)
@@ -21,7 +21,9 @@ export async function POST(req: Request) {
   try {
     const acc = await checkPlayerAccess(b.playerId);
     if (!acc.ok) return fail(acc.error, acc.status);
-    await db.insert(players).values({ id: b.playerId }).onConflictDoNothing();
+    // Ключ улова приходит от клиента: уловы отправляются повторно при обрыве связи,
+    // и повтор не должен задваивать строку в журнале — на это есть уникальный индекс catches_cid_uq.
+    const cid = typeof b.cid === "string" && /^[A-Za-z0-9_-]{8,40}$/.test(b.cid) ? b.cid : null;
     await db.insert(catches).values({
       playerId: b.playerId,
       fishId: f.id,
@@ -29,7 +31,8 @@ export async function POST(req: Request) {
       variant: b.variant ? String(b.variant).slice(0, 24) : null,
       locationId: b.locationId,
       gameDay: Math.max(1, Math.floor(b.gameDay ?? 1)),
-    });
+      cid,
+    }).onConflictDoNothing();
     return json({ ok: true });
   } catch (e) {
     return dbError(e);

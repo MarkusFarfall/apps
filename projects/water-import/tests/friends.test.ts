@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   avatarHue, boatOf, dayLabel, initialsOf, isOnline, isValidUserId, lastSeenLabel, locOf, normalizeQuery,
   pairOf, playTimeLabel, portOf, spotOf, weatherOf, whereLabel,
-  FRIEND_LIMIT, ONLINE_WINDOW_MS, PENDING_OUT_LIMIT,
+  FRIEND_LIMIT, INCOMING_LIMIT, ONLINE_WINDOW_MS, PENDING_OUT_LIMIT,
   type FriendWhere,
 } from "../src/game/friends";
 import { BOATS, DAYS_PER_SEASON, LOCATIONS, SEASONS } from "../src/game/world";
@@ -144,4 +144,11 @@ test("подпись места: лодка, порт, скрытое место
   assert.equal(whereLabel(null), "ещё не выходил в море");
   // приватность важнее деталей: при hidden не остаётся ни локации, ни порта
   assert.equal(whereLabel({ ...base, hidden: true, atPort: true }), "скрыл своё местоположение");
+});
+
+test("предел входящих заявок есть и он больше исходящих", () => {
+  // Без него аккаунт с десятком «пустышек» заваливал чужой список друзей.
+  assert.ok(INCOMING_LIMIT >= PENDING_OUT_LIMIT);
+  assert.ok(INCOMING_LIMIT <= 200, "список должен оставаться читаемым");
+  assert.equal(typeof INCOMING_LIMIT, "number");
 });

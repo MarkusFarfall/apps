@@ -4,7 +4,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { GameAudio } from "@/game/audio";
 import { depthToU, Engine, newSave, uToDepth, type TravelMode, type Trip } from "@/game/engine";
 import { FISH } from "@/game/fish";
-import { clearLocal, deleteRemote, fetchMe, forgetRememberedAccount, loadLocal, loadRemote, loadRememberedAccount, logCatch, logout as apiLogout, pickNewest, rememberAccount, saveLocal, saveRemote, type AccountUser } from "@/game/persist";
+import { clearLocal, deleteRemote, fetchMe, flushCatches, forgetRememberedAccount, loadLocal, loadRemote, loadRememberedAccount, logCatch, logout as apiLogout, pickNewest, rememberAccount, saveLocal, saveRemote, type AccountUser } from "@/game/persist";
 import { AccountBadge, ProfileModal, type AccountState } from "./Account";
 import { AuthScreen } from "./AuthScreen";
 import { MILESTONES } from "@/game/world";
@@ -68,14 +68,24 @@ export default function Game() {
   const engine = engine0;
   const audio = audio0;
   useEffect(() => {
-    const w = window as unknown as { __zv?: Engine; __zvAudio?: typeof GameAudio; __zvSound?: () => unknown };
-    w.__zv = engine;
-    w.__zvAudio = GameAudio;
-    // Срез состояния звука — для поддержки и автотестов.
-    w.__zvSound = () => ({ ...audioRef.current.debug(), audioFails: audioFails.current, frameFails: frameFails.current });
+    // Отладочные хуки — только в разработке. В проде `window.__zv` позволял править сохранение из консоли
+    // и отправлять его на сервер — с ним рейтинг начинался с правки localStorage.
+    if (process.env.NODE_ENV !== "production") {
+      const w = window as unknown as { __zv?: Engine; __zvAudio?: typeof GameAudio; __zvSound?: () => unknown };
+      w.__zv = engine;
+      w.__zvAudio = GameAudio;
+      // Срез состояния звука — для поддержки и автотестов.
+      w.__zvSound = () => ({ ...audioRef.current.debug(), audioFails: audioFails.current, frameFails: frameFails.current });
+    }
     const vis = () => audioRef.current.setHidden(document.visibilityState === "hidden");
+    // Связь вернулась — досылаем уловы, пойманные офлайн.
+    const onOnline = () => { if (pidRef.current) void flushCatches(pidRef.current); };
     document.addEventListener("visibilitychange", vis);
-    return () => document.removeEventListener("visibilitychange", vis);
+    window.addEventListener("online", onOnline);
+    return () => {
+      document.removeEventListener("visibilitychange", vis);
+      window.removeEventListener("online", onOnline);
+    };
   }, [engine]);
 
   /** Лучшее из локального и серверного сохранения профиля */
@@ -144,6 +154,8 @@ export default function Game() {
       }
       pidRef.current = me.playerId;
       rememberAccount(me.playerId, me.user);
+      // Уловы, пойманные без связи, уходят на сервер при первой возможности.
+      void flushCatches(me.playerId);
       setAccount({ user: me.user, stats: me.stats, offline: false });
       const best = await loadBest(me.playerId);
       setName(best?.name ?? me.user.username);
@@ -203,6 +215,7 @@ export default function Game() {
     setAccount({ user, stats: null, offline: false });
     pidRef.current = playerId;
     rememberAccount(playerId, user);
+    void flushCatches(playerId);
     if (mode === "register") {
       // новая учётная запись: имя рыбака берём из имени пользователя, если своё ещё не задано
       if (!e.s.name || e.s.name === "Рыбак") e.s.name = user.username;

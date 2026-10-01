@@ -9,6 +9,20 @@ import { sanitizeSave } from "@/lib/sanitize";
 
 export const dynamic = "force-dynamic";
 
+/** На сервере прогресс ушёл дальше — отдаём актуальное сохранение и 409. */
+class ConflictError extends Error {
+  constructor(readonly save: unknown) {
+    super("conflict");
+  }
+}
+
+/** Профиль перестал принадлежать текущему пользователю (например, аккаунт удалён). */
+class ForbiddenError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
+}
+
 export async function GET(req: Request) {
   const playerId = new URL(req.url).searchParams.get("playerId") ?? "";
   try {
@@ -37,29 +51,24 @@ export async function PUT(req: Request) {
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0);
   const str = (v: unknown, max: number) => (typeof v === "string" && v.length > 0 && v.length <= max ? v : null);
   const name = cleanName(b.name) ?? "Рыбак";
-  // прогресс приходит с клиента — приводим его к разумному виду, прежде чем считать рейтинг
-  const clean = sanitizeSave(data);
-  const save = clean.data;
-  const stats = (save.stats ?? {}) as Record<string, unknown>;
 
   try {
     const acc = await checkPlayerAccess(playerId);
     if (!acc.ok) return fail(acc.error, acc.status);
-    // защита от перезаписи более свежего прогресса с другого устройства
-    if (!b.force) {
-      const cur = await db.select({ playSeconds: saves.playSeconds, data: saves.data }).from(saves).where(eq(saves.playerId, playerId)).limit(1);
-      if (cur[0] && cur[0].playSeconds > num(stats.playSeconds) + 120) return json({ conflict: true, save: cur[0].data }, 409);
-    }
-    await db
-      .insert(players)
-      .values({ id: playerId, name })
-      .onConflictDoUpdate({ target: players.id, set: { lastSeenAt: sql`now()`, name } });
+
+    // Наигранное время не может превышать возраст аккаунта: сервер знает дату
+    // регистрации, поэтому «три года игры за вечер» отсекаются ещё до рейтинга.
+    const accountAgeSeconds = Math.max(0, (Date.now() - Date.parse(acc.createdAt)) / 1000);
+    // прогресс приходит с клиента — приводим его к разумному виду, прежде чем считать рейтинг
+    const clean = sanitizeSave(data, { accountAgeSeconds });
+    const save = clean.data;
+    const stats = (save.stats ?? {}) as Record<string, unknown>;
     const values = {
       playerId,
       data: save,
       version: num(save.version) || 1,
       money: num(save.money),
-      codexCount: clean.species,
+      codexCount: clean.codexCount,
       totalCaught: num(stats.totalCaught),
       playSeconds: num(stats.playSeconds),
       level: levelFromXp(num(save.xp)),
@@ -74,9 +83,29 @@ export async function PUT(req: Request) {
       boat: num(save.boat),
       gameDay: Math.max(1, Math.floor(num(save.minutes) / MIN_PER_DAY) + 1),
     };
-    await db.insert(saves).values(values).onConflictDoUpdate({ target: saves.playerId, set: { ...values, updatedAt: sql`now()` } });
+
+    await db.transaction(async (tx) => {
+      // Блокируем строку профиля: два устройства, сохранившихся одновременно,
+      // раньше проходили проверку конфликта оба и побеждал последний запись.
+      const own = await tx.select({ userId: players.userId }).from(players).where(eq(players.id, playerId)).limit(1).for("update");
+      if (!own[0] || own[0].userId !== acc.userId) throw new ForbiddenError(403, "forbidden");
+
+      // защита от перезаписи более свежего прогресса с другого устройства
+      if (!b.force) {
+        const cur = await tx.select({ playSeconds: saves.playSeconds, data: saves.data }).from(saves).where(eq(saves.playerId, playerId)).limit(1);
+        if (cur[0] && cur[0].playSeconds > num(stats.playSeconds) + 120) throw new ConflictError(cur[0].data);
+      }
+
+      await tx
+        .insert(players)
+        .values({ id: playerId, name })
+        .onConflictDoUpdate({ target: players.id, set: { lastSeenAt: sql`now()`, name } });
+      await tx.insert(saves).values(values).onConflictDoUpdate({ target: saves.playerId, set: { ...values, updatedAt: sql`now()` } });
+    });
     return json({ ok: true });
   } catch (e) {
+    if (e instanceof ConflictError) return json({ conflict: true, save: e.save }, 409);
+    if (e instanceof ForbiddenError) return fail(e.message, e.status);
     return dbError(e);
   }
 }

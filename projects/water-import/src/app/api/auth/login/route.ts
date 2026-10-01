@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
@@ -17,6 +18,13 @@ export async function POST(req: Request) {
   const login = typeof b?.login === "string" ? b.login.trim().toLowerCase() : "";
   const password = typeof b?.password === "string" ? b.password : "";
   if (!login || !password || password.length > 128) return fail("Введите логин и пароль");
+  // Второй счётчик — на сам аккаунт, а не на адрес. Перебор пароля одной записи
+  // иначе упирается только в лимит по IP, а его обходит ротация адресов. Хеш
+  // вместо имени: ключам счётчиков не нужно знать, кого они считают.
+  const acct = createHash("sha256").update(login).digest("hex").slice(0, 16);
+  const acctLimited = await rateLimit("login-acct", 10, 15 * 60_000, acct);
+  if (acctLimited === null) return fail("Сервер временно недоступен", 503);
+  if (!acctLimited) return fail("Слишком много попыток. Попробуйте через несколько минут", 429);
   try {
     const rows = await db.select().from(users).where(eq(users.usernameLower, login)).limit(1);
     const u = rows[0];
