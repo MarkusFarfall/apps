@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Сквозная проверка «Знакомой воды»: гость → регистрация → сохранения → уловы → рейтинги → вход.
+# Сквозная проверка «Знакомой воды»: закрытый доступ → регистрация → сохранения → уловы → рейтинги → вход → выход.
+# Гостевого режима нет: без аккаунта данные игрока недоступны (это проверяется первым делом).
 # Запуск:  BASE_URL=http://localhost:3000 bash scripts/smoke.sh
 # В конце тестовые данные удаляются автоматически (scripts/reset-test-data.mjs, нужен DATABASE_URL).
 set -u
@@ -15,8 +16,8 @@ FAILS=0
 STAMP="$(date +%s)"
 USERNAME="test_${STAMP}"
 PASS="more2026sol"
-GUEST="$(node -e 'console.log(crypto.randomUUID())')"
 PID=""
+STRANGER="$(node -e 'console.log(crypto.randomUUID())')"
 
 json_field() { node -e '
   let raw = "";
@@ -47,15 +48,16 @@ SAVE_SMALL='{"version":3,"name":"Тест","money":1500,"xp":300,"codex":{"turbo
 SAVE_BIG='{"version":3,"name":"Тест","money":4200,"xp":900,"codex":{"turbot":{"count":3,"maxWeight":4.1,"firstDay":2,"variants":["trophy"]},"goby":{"count":5,"maxWeight":0.2,"firstDay":1,"variants":[]}},"achievements":["first","night"],"stats":{"playSeconds":1800,"totalCaught":19,"totalEarned":5200,"linesSnapped":2,"escaped":3,"nightCatches":4,"stormCatches":1,"releases":1,"jumps":2,"maxDepthCaught":26,"perfectHooks":1,"biggest":{"fishId":"turbot","weight":4.1}}}'
 
 echo "Проверяю $BASE_URL"
-echo "── 1. гостевое сохранение (без аккаунта)"
-check '{"ok":true}' "$(api PUT /api/save "{\"playerId\":\"$GUEST\",\"name\":\"Тест\",\"data\":$SAVE_SMALL}")" "PUT /api/save (гость)"
-GOT="$(api GET "/api/save?playerId=$GUEST" | json_field save.money)"
-check "1500" "$GOT" "GET /api/save → монет 1500"
+echo "── 1. гостевой доступ закрыт"
+check "" "$(api GET /api/auth/me | json_field user)" "без входа /api/auth/me не отдаёт пользователя"
+check "403" "$(status -X PUT "$BASE_URL/api/save" -H 'content-type: application/json' -H "Origin: $BASE_URL" -d "{\"playerId\":\"$STRANGER\",\"name\":\"Тест\",\"data\":$SAVE_SMALL}")" "запись чужого профиля → 403"
+check "403" "$(status "$BASE_URL/api/save?playerId=$STRANGER")" "чтение чужого профиля → 403"
 
-echo "── 2. регистрация с переносом гостевого прогресса"
-RESP="$(api POST /api/auth/register "{\"username\":\"$USERNAME\",\"password\":\"$PASS\",\"guestId\":\"$GUEST\"}")"
+echo "── 2. регистрация"
+RESP="$(api POST /api/auth/register "{\"username\":\"$USERNAME\",\"password\":\"$PASS\"}")"
 PID="$(printf '%s' "$RESP" | json_field playerId)"
-check "$GUEST" "$PID" "гостевой профиль принят аккаунтом"
+check "непусто" "$(if [ -n "$PID" ]; then echo непусто; else echo пусто; fi)" "учётная запись создана, профиль выдан"
+check "!$USERNAME" "$(api POST /api/auth/register "{\"username\":\"$USERNAME\",\"password\":\"$PASS\"}" | json_field error)" "повторная регистрация того же имени отклонена"
 
 echo "── 3. сессия и облачное сохранение"
 check "$USERNAME" "$(api GET /api/auth/me | json_field user.username)" "GET /api/auth/me"
@@ -94,9 +96,11 @@ check "1" "$(api GET "/api/save?playerId=$PID" | node -e 'let r="";process.stdin
 HACKW="$(api GET "/api/save?playerId=$PID" | node -e 'let r="";process.stdin.on("data",c=>r+=c).on("end",()=>{const w=JSON.parse(r).save.codex.turbot.maxWeight;console.log(Math.abs(w-6.3)<0.01?"ограничен по виду":"НЕ ОГРАНИЧЕН: "+w)})')"
 check "ограничен по виду" "$HACKW" "вес рыбы ограничен максимумом вида"
 
-echo "── 9. выход"
+echo "── 9. выход и закрытый доступ"
 check "200" "$(status -X POST "$BASE_URL/api/auth/logout")" "logout"
 check "" "$(api GET /api/auth/me | json_field user)" "сессия закрыта"
+check "401" "$(status "$BASE_URL/api/save?playerId=$PID")" "после выхода прогресс недоступен"
+check "401" "$(status -X POST "$BASE_URL/api/catches" -H 'content-type: application/json' -H "Origin: $BASE_URL" -d "{\"playerId\":\"$PID\",\"fishId\":\"turbot\",\"weight\":2,\"locationId\":\"bay\"}")" "улов без входа отклонён"
 
 rm -f "$COOKIES"
 if [ "$FAILS" -eq 0 ]; then

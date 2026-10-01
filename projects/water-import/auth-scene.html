@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Знакомая вода — сцена входа</title>
+<style>
+  :root {
+    --brass: #c8a35a;
+    --line: rgba(200, 163, 90, 0.22);
+    --font-display: Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 48px;
+    background: radial-gradient(1200px 600px at 50% -10%, #0d1a26 0%, #050a12 60%);
+    color: #e6e1d6; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { font-family: var(--font-display); font-weight: 500; font-size: 30px; margin: 0 0 4px; }
+  .lead { color: #8fa0ae; font-size: 14px; margin: 0 0 26px; }
+  .row { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+  .panel { margin: 0; width: 400px; max-width: 100%; }
+  .frame { position: relative; height: 520px; overflow: hidden; border: 1px solid var(--line); border-radius: 4px; background: #050c14; }
+  figcaption { padding: 14px 2px 0; }
+  .label-brass { color: var(--brass); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; }
+  figcaption p { margin: 6px 0 0; font-family: var(--font-display); font-style: italic; font-size: 18px; color: #ece3d0; }
+  .hint { margin-top: 30px; color: #7f8f9d; font-size: 12px; line-height: 1.7; max-width: 620px; }
+  /* ───────── сцена входа: знакомая вода, всё нарисовано вектором ───────── */
+.zv-scene {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.zv-wave {
+  animation: zvWave 9s linear infinite;
+}
+.zv-wave-far { animation-duration: 13s; }
+.zv-wave-mid { animation-duration: 8.5s; animation-direction: reverse; }
+.zv-wave-near { animation-duration: 5.5s; }
+@keyframes zvWave {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100px); }
+}
+
+.zv-sun { animation: zvSun 11s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 100%; }
+@keyframes zvSun {
+  0%, 100% { transform: translateY(2px) scale(1); }
+  50% { transform: translateY(-4px) scale(1.03); }
+}
+
+.zv-star { animation: zvStar 4.5s ease-in-out infinite; }
+@keyframes zvStar {
+  0%, 100% { opacity: 0.16; }
+  50% { opacity: 0.92; }
+}
+
+.zv-bird { animation: zvFly 26s linear infinite; }
+@keyframes zvFly {
+  from { transform: translate(-40px, 6px); }
+  50% { transform: translate(200px, -6px); }
+  to { transform: translate(440px, 4px); }
+}
+.zv-wing { transform-box: fill-box; transform-origin: 50% 100%; animation: zvFlap 0.85s ease-in-out infinite; }
+@keyframes zvFlap {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.3); }
+}
+
+.zv-boat { transform-box: fill-box; transform-origin: 50% 94%; animation: zvBob 6.5s ease-in-out infinite; }
+@keyframes zvBob {
+  0%, 100% { transform: translateY(0) rotate(-1.6deg); }
+  50% { transform: translateY(-2.6px) rotate(1.6deg); }
+}
+
+.zv-float { transform-box: fill-box; transform-origin: 50% 0%; animation: zvFloat 3.4s ease-in-out infinite; }
+@keyframes zvFloat {
+  0%, 100% { transform: translateY(0); }
+  38% { transform: translateY(3px); }
+  62% { transform: translateY(-1.5px); }
+}
+
+.zv-lantern { animation: zvLantern 3.4s ease-in-out infinite; }
+@keyframes zvLantern {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.zv-fish { animation: zvSwim 19s linear infinite; }
+@keyframes zvSwim {
+  from { transform: translateX(-70px); }
+  to { transform: translateX(470px); }
+}
+.zv-fish-inner { animation: zvFishBob 3.8s ease-in-out infinite; }
+@keyframes zvFishBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-7px); }
+}
+.zv-tail { transform-box: fill-box; transform-origin: 100% 50%; animation: zvTail 0.45s ease-in-out infinite; }
+@keyframes zvTail {
+  0%, 100% { transform: rotate(-10deg); }
+  50% { transform: rotate(10deg); }
+}
+
+.zv-bubble { animation: zvRise 7s ease-in infinite; }
+@keyframes zvRise {
+  0% { transform: translateY(0); opacity: 0; }
+  12% { opacity: 0.5; }
+  70% { opacity: 0.32; }
+  100% { transform: translateY(-118px); opacity: 0; }
+}
+
+.zv-shimmer { animation: zvShimmer 3.6s ease-in-out infinite; }
+@keyframes zvShimmer {
+  0%, 100% { opacity: 0.22; }
+  50% { opacity: 0.72; }
+}
+
+.zv-jump { animation: zvJump 12s cubic-bezier(0.3, 0.1, 0.4, 1) infinite; }
+@keyframes zvJump {
+  0%, 58% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+  60% { opacity: 1; }
+  68% { transform: translate(-30px, -54px) rotate(-34deg); }
+  76% { transform: translate(-62px, -34px) rotate(26deg); }
+  84%, 100% { transform: translate(-92px, 8px) rotate(58deg); opacity: 0; }
+}
+.zv-splash { animation: zvSplash 12s ease-out infinite; transform-box: fill-box; transform-origin: 50% 50%; }
+@keyframes zvSplash {
+  0%, 58% { transform: scale(0.4); opacity: 0; }
+  62% { transform: scale(1.15); opacity: 0.5; }
+  70%, 100% { transform: scale(0.6); opacity: 0; }
+}
+
+/* галочка после успешного входа */
+.zv-check {
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  animation: zvCheck 0.6s ease-out 0.1s forwards;
+}
+@keyframes zvCheck {
+  to { stroke-dashoffset: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zv-scene,
+  .zv-scene * {
+    animation: none !important;
+  }
+  .zv-check { stroke-dashoffset: 0; }
+}
+
+</style>
+</head>
+<body>
+  <h1>Сцена входа и регистрации</h1>
+  <p class="lead">Тот же векторный компонент, что в игре: волны, лодка, рыба, пузырьки и всплеск. Наведите курсор на панель и нажмите — можно «пришпорить» время.</p>
+  <div class="row">
+    
+  <figure class="panel">
+    <div class="frame"><svg class="zv-scene" viewBox="0 0 400 400" preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false"><defs><linearGradient id="zv-sky-home" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#070d1c"></stop><stop offset="46%" stop-color="#1b2740"></stop><stop offset="78%" stop-color="#5c3f45"></stop><stop offset="100%" stop-color="#b9713f"></stop></linearGradient><linearGradient id="zv-sky-out" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#050b18"></stop><stop offset="44%" stop-color="#152a44"></stop><stop offset="76%" stop-color="#3f5566"></stop><stop offset="100%" stop-color="#c78a54"></stop></linearGradient><radialGradient id="zv-sun" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#fff4dd" stop-opacity="0.98"></stop><stop offset="45%" stop-color="#ffb066" stop-opacity="0.75"></stop><stop offset="100%" stop-color="#ffb066" stop-opacity="0"></stop></radialGradient><linearGradient id="zv-water" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#243349"></stop><stop offset="55%" stop-color="#0d1725"></stop><stop offset="100%" stop-color="#050a12"></stop></linearGradient><linearGradient id="zv-wash" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffb066" stop-opacity="0.5"></stop><stop offset="100%" stop-color="#ffb066" stop-opacity="0"></stop></linearGradient><linearGradient id="zv-hull" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2f2a26"></stop><stop offset="100%" stop-color="#120f0d"></stop></linearGradient><linearGradient id="zv-sail" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#f4ead6"></stop><stop offset="100%" stop-color="#cbb894"></stop></linearGradient><linearGradient id="zv-sail-back" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#ded0b4"></stop><stop offset="100%" stop-color="#a38f6d"></stop></linearGradient></defs><rect x="0" y="0" width="400" height="252" fill="url(#zv-sky-home)"></rect><g fill="#fdf6e6"><circle cx="34" cy="34" r="1.1" class="zv-star" style="animation-delay:0.00s"></circle><circle cx="72" cy="62" r="0.8" class="zv-star" style="animation-delay:0.53s"></circle><circle cx="118" cy="26" r="1" class="zv-star" style="animation-delay:1.06s"></circle><circle cx="166" cy="74" r="0.7" class="zv-star" style="animation-delay:1.59s"></circle><circle cx="206" cy="38" r="0.9" class="zv-star" style="animation-delay:2.12s"></circle><circle cx="252" cy="66" r="0.75" class="zv-star" style="animation-delay:2.65s"></circle><circle cx="296" cy="28" r="1.05" class="zv-star" style="animation-delay:3.18s"></circle><circle cx="338" cy="58" r="0.8" class="zv-star" style="animation-delay:3.71s"></circle><circle cx="372" cy="96" r="0.7" class="zv-star" style="animation-delay:4.24s"></circle><circle cx="46" cy="116" r="0.75" class="zv-star" style="animation-delay:4.77s"></circle><circle cx="150" cy="128" r="0.6" class="zv-star" style="animation-delay:5.30s"></circle><circle cx="268" cy="118" r="0.65" class="zv-star" style="animation-delay:5.83s"></circle></g><g class="zv-sun"><circle cx="300" cy="228" r="66" fill="url(#zv-sun)"></circle><circle cx="300" cy="228" r="17" fill="#fff6e4" opacity="0.92"></circle></g><rect x="252" y="254" width="96" height="86" fill="url(#zv-wash)" opacity="0.5"></rect><g class="zv-bird" style="animation-duration:30s"><g transform="translate(96 102)"><path d="M-9 0q9-6 18 0" fill="none" stroke="#1b2536" stroke-width="1.7" stroke-linecap="round" class="zv-wing" style="animation-delay:0s"></path><path d="M9 0q9-6 18 0" fill="none" stroke="#1b2536" stroke-width="1.7" stroke-linecap="round" class="zv-wing" style="animation-delay:0.08s"></path></g><g transform="translate(130 114)"><path d="M-9 0q9-6 18 0" fill="none" stroke="#1b2536" stroke-width="1.7" stroke-linecap="round" class="zv-wing" style="animation-delay:0.22s"></path><path d="M9 0q9-6 18 0" fill="none" stroke="#1b2536" stroke-width="1.7" stroke-linecap="round" class="zv-wing" style="animation-delay:0.3s"></path></g></g><rect x="0" y="248" width="400" height="152" fill="url(#zv-water)"></rect><g opacity="0.55"><path class="zv-wave zv-wave-far" fill="#2b3d55" d="M-100 252q25-7 50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0V400H-100Z"></path></g><path class="zv-wave zv-wave-mid" fill="#1a2739" d="M-100 272q25-9 50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0V400H-100Z"></path><path class="zv-wave zv-wave-near" fill="#0b1420" d="M-100 300q25-11 50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0V400H-100Z"></path><g fill="#ffd9a0"><rect x="268" y="262" width="26" height="1.8" rx="0.9" class="zv-shimmer" style="animation-delay:0s"></rect><rect x="286" y="276" width="18" height="1.8" rx="0.9" class="zv-shimmer" style="animation-delay:0.42s"></rect><rect x="258" y="290" width="22" height="1.8" rx="0.9" class="zv-shimmer" style="animation-delay:0.84s"></rect><rect x="292" y="306" width="14" height="1.8" rx="0.9" class="zv-shimmer" style="animation-delay:1.26s"></rect><rect x="272" y="322" width="20" height="1.8" rx="0.9" class="zv-shimmer" style="animation-delay:1.68s"></rect></g><g fill="#bcd8e6"><circle cx="84" cy="398" r="3.2" class="zv-bubble" style="animation-delay:0s;animation-duration:7s" opacity="0"></circle><circle cx="126" cy="398" r="2.2" class="zv-bubble" style="animation-delay:1.9s;animation-duration:8s" opacity="0"></circle><circle cx="196" cy="398" r="2.8" class="zv-bubble" style="animation-delay:3.4s;animation-duration:9s" opacity="0"></circle><circle cx="242" cy="398" r="2" class="zv-bubble" style="animation-delay:0.7s;animation-duration:7s" opacity="0"></circle><circle cx="316" cy="398" r="3.6" class="zv-bubble" style="animation-delay:2.6s;animation-duration:8s" opacity="0"></circle><circle cx="352" cy="398" r="2.4" class="zv-bubble" style="animation-delay:4.4s;animation-duration:9s" opacity="0"></circle></g><g transform="translate(0 336)"><g class="zv-fish"><g class="zv-fish-inner"><path class="zv-tail" d="M-28 0l-13-9v18z" fill="#5f8f7d"></path><path d="M-28 0c10-10 28-11 40-1-12 10-30 9-40 1z" fill="#8dbaa6"></path><path d="M-10-4c8-4 18-3 24 2-8 3-18 3-24-2z" fill="#a9d0bd" opacity="0.55"></path><circle cx="16" cy="-2.5" r="1.9" fill="#08121b"></circle><path d="M-2-7q6-7 12-1" fill="none" stroke="#6f9d8a" stroke-width="1.6"></path></g></g></g><g transform="translate(326 300)"><circle cx="0" cy="0" r="7" fill="#cfe6f0" opacity="0.35" class="zv-splash"></circle><g class="zv-jump"><path class="zv-tail" d="M-16 0l-9-6v12z" fill="#6d9f8b"></path><path d="M-16 0c7-7 19-8 27-1-8 7-20 7-27 1z" fill="#9cc9b4"></path><circle cx="7" cy="-2" r="1.5" fill="#08121b"></circle></g></g><g transform="translate(196 252) scale(-1 1)"><g class="zv-boat"><ellipse cx="0" cy="18" rx="52" ry="7" fill="#050a12" opacity="0.45"></ellipse><path d="M-46 0q7 17 46 17t46-17z" fill="url(#zv-hull)"></path><path d="M-46 0h92" stroke="#6b5a44" stroke-width="1.6" opacity="0.8"></path><path d="M-2 0V-84" stroke="#241f1b" stroke-width="3.2" stroke-linecap="round"></path><path d="M1-80l44 70H1z" fill="url(#zv-sail)" opacity="0.96"></path><path d="M-3-72l-34 64h34z" fill="url(#zv-sail-back)" opacity="0.85"></path><circle cx="-26" cy="-16" r="6.2" fill="#0b0f16"></circle><path d="M-26-9q5 7 4 14h-9q-1-7 5-14z" fill="#0b0f16"></path><path d="M-21-17l44-30" stroke="#161c27" stroke-width="1.9" stroke-linecap="round"></path><path d="M23-47q10 44 3 78" fill="none" stroke="#cdd9e4" stroke-width="0.9" opacity="0.45"></path><circle cx="26" cy="31" r="2.4" fill="#f0c98a" class="zv-float"></circle><circle cx="0" cy="-42" r="13" fill="#ffb066" opacity="0.22" class="zv-lantern"></circle><circle cx="0" cy="-42" r="3.1" fill="#ffe6b8" class="zv-lantern"></circle></g></g></svg></div>
+    <figcaption>
+      <div class="label-brass">Вход</div>
+      <p>С возвращением на воду. Лодка ждёт.</p>
+    </figcaption>
+  </figure>
+    
+  <figure class="panel">
+    <div class="frame"><svg class="zv-scene" viewBox="0 0 400 400" preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false"><defs><linearGradient id="zv-sky-home" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#070d1c"></stop><stop offset="46%" stop-color="#1b2740"></stop><stop offset="78%" stop-color="#5c3f45"></stop><stop offset="100%" stop-color="#b9713f"></stop></linearGradient><linearGradient id="zv-sky-out" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#050b18"></stop><stop offset="44%" stop-color="#152a44"></stop><stop offset="76%" stop-color="#3f5566"></stop><stop offset="100%" stop-color="#c78a54"></stop></linearGradient><radialGradient id="zv-sun" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#fff4dd" stop-opacity="0.98"></stop><stop offset="45%" stop-color="#ffd79a" stop-opacity="0.75"></stop><stop offset="100%" stop-color="#ffd79a" stop-opacity="0"></stop></radialGradient><linearGradient id="zv-water" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1c2c40"></stop><stop offset="55%" stop-color="#0d1725"></stop><stop offset="100%" stop-color="#050a12"></stop></linearGradient><linearGradient id="zv-wash" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffd79a" stop-opacity="0.5"></stop><stop offset="100%" stop-color="#ffd79a" stop-opacity="0"></stop></linearGradient><linearGradient id="zv-hull" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#2f2a26"></stop><stop offset="100%" stop-color="#120f0d"></stop></linearGradient><linearGradient id="zv-sail" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#f4ead6"></stop><stop offset="100%" stop-color="#cbb894"></stop></linearGradient><linearGradient id="zv-sail-back" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#ded0b4"></stop><stop offset="100%" stop-color="#a38f6d"></stop></linearGradient></defs><rect x="0" y="0" width="400" height="252" fill="url(#zv-sky-out)"></rect><g fill="#fdf6e6"><circle cx="34" cy="34" r="1.1" class="zv-star" style="animation-delay:0.00s"></circle><circle cx="72" cy="62" r="0.8" class="zv-star" style="animation-delay:0.53s"></circle><circle cx="118" cy="26" r="1" class="zv-star" style="animation-delay:1.06s"></circle><circle cx="166" cy="74" r="0.7" class="zv-star" style="animation-delay:1.59s"></circle><circle cx="206" cy="38" r="0.9" class="zv-star" style="animation-delay:2.12s"></circle><circle cx="252" cy="66" r="0.75" class="zv-star" style="animation-delay:2.65s"></circle><circle cx="296" cy="28" r="1.05" class="zv-star" style="animation-delay:3.18s"></circle><circle cx="338" cy="58" r="0.8" class="zv-star" style="animation-delay:3.71s"></circle><circle cx="372" cy="96" r="0.7" class="zv-star" style="animation-delay:4.24s"></circle><circle cx="46" cy="116" r="0.75" class="zv-star" style="animation-delay:4.77s"></circle><circle cx="150" cy="128" r="0.6" class="zv-star" style="animation-delay:5.30s"></circle><circle cx="268" cy="118" r="0.65" class="zv-star" style="animation-delay:5.83s"></circle></g><g class="zv-sun"><circle cx="300" cy="228" r="66" fill="url(#zv-sun)"></circle><circle cx="300" cy="228" r="17" fill="#fff6e4" opacity="0.92"></circle></g><rect x="252" y="254" width="96" height="86" fill="url(#zv-wash)" opacity="0.5"></rect><g class="zv-bird" style="animation-duration:24s"><g transform="translate(96 102)"><path d="M-9 0q9-6 18 0" fill="none" stroke="#1b2536" stroke-width="1.7" stroke-linecap="round" class="zv-wing" style="animation-delay:0s"></path><path d="M9 0q9-6 18 0" fill="none" stroke="#1b2536" stroke-width="1.7" stroke-linecap="round" class="zv-wing" style="animation-delay:0.08s"></path></g><g transform="translate(130 114)"><path d="M-9 0q9-6 18 0" fill="none" stroke="#1b2536" stroke-width="1.7" stroke-linecap="round" class="zv-wing" style="animation-delay:0.22s"></path><path d="M9 0q9-6 18 0" fill="none" stroke="#1b2536" stroke-width="1.7" stroke-linecap="round" class="zv-wing" style="animation-delay:0.3s"></path></g></g><rect x="0" y="248" width="400" height="152" fill="url(#zv-water)"></rect><g opacity="0.55"><path class="zv-wave zv-wave-far" fill="#2b3d55" d="M-100 252q25-7 50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0V400H-100Z"></path></g><path class="zv-wave zv-wave-mid" fill="#1a2739" d="M-100 272q25-9 50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0V400H-100Z"></path><path class="zv-wave zv-wave-near" fill="#0b1420" d="M-100 300q25-11 50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0V400H-100Z"></path><g fill="#ffd9a0"><rect x="268" y="262" width="26" height="1.8" rx="0.9" class="zv-shimmer" style="animation-delay:0s"></rect><rect x="286" y="276" width="18" height="1.8" rx="0.9" class="zv-shimmer" style="animation-delay:0.42s"></rect><rect x="258" y="290" width="22" height="1.8" rx="0.9" class="zv-shimmer" style="animation-delay:0.84s"></rect><rect x="292" y="306" width="14" height="1.8" rx="0.9" class="zv-shimmer" style="animation-delay:1.26s"></rect><rect x="272" y="322" width="20" height="1.8" rx="0.9" class="zv-shimmer" style="animation-delay:1.68s"></rect></g><g fill="#bcd8e6"><circle cx="84" cy="398" r="3.2" class="zv-bubble" style="animation-delay:0s;animation-duration:7s" opacity="0"></circle><circle cx="126" cy="398" r="2.2" class="zv-bubble" style="animation-delay:1.9s;animation-duration:8s" opacity="0"></circle><circle cx="196" cy="398" r="2.8" class="zv-bubble" style="animation-delay:3.4s;animation-duration:9s" opacity="0"></circle><circle cx="242" cy="398" r="2" class="zv-bubble" style="animation-delay:0.7s;animation-duration:7s" opacity="0"></circle><circle cx="316" cy="398" r="3.6" class="zv-bubble" style="animation-delay:2.6s;animation-duration:8s" opacity="0"></circle><circle cx="352" cy="398" r="2.4" class="zv-bubble" style="animation-delay:4.4s;animation-duration:9s" opacity="0"></circle></g><g transform="translate(0 336)"><g class="zv-fish"><g class="zv-fish-inner"><path class="zv-tail" d="M-28 0l-13-9v18z" fill="#5f8f7d"></path><path d="M-28 0c10-10 28-11 40-1-12 10-30 9-40 1z" fill="#8dbaa6"></path><path d="M-10-4c8-4 18-3 24 2-8 3-18 3-24-2z" fill="#a9d0bd" opacity="0.55"></path><circle cx="16" cy="-2.5" r="1.9" fill="#08121b"></circle><path d="M-2-7q6-7 12-1" fill="none" stroke="#6f9d8a" stroke-width="1.6"></path></g></g></g><g transform="translate(326 300)"><circle cx="0" cy="0" r="7" fill="#cfe6f0" opacity="0.35" class="zv-splash"></circle><g class="zv-jump"><path class="zv-tail" d="M-16 0l-9-6v12z" fill="#6d9f8b"></path><path d="M-16 0c7-7 19-8 27-1-8 7-20 7-27 1z" fill="#9cc9b4"></path><circle cx="7" cy="-2" r="1.5" fill="#08121b"></circle></g></g><g transform="translate(196 252)"><g class="zv-boat"><ellipse cx="0" cy="18" rx="52" ry="7" fill="#050a12" opacity="0.45"></ellipse><path d="M-46 0q7 17 46 17t46-17z" fill="url(#zv-hull)"></path><path d="M-46 0h92" stroke="#6b5a44" stroke-width="1.6" opacity="0.8"></path><path d="M-2 0V-84" stroke="#241f1b" stroke-width="3.2" stroke-linecap="round"></path><path d="M1-80l44 70H1z" fill="url(#zv-sail)" opacity="0.96"></path><path d="M-3-72l-34 64h34z" fill="url(#zv-sail-back)" opacity="0.85"></path><circle cx="-26" cy="-16" r="6.2" fill="#0b0f16"></circle><path d="M-26-9q5 7 4 14h-9q-1-7 5-14z" fill="#0b0f16"></path><path d="M-21-17l44-30" stroke="#161c27" stroke-width="1.9" stroke-linecap="round"></path><path d="M23-47q10 44 3 78" fill="none" stroke="#cdd9e4" stroke-width="0.9" opacity="0.45"></path><circle cx="26" cy="31" r="2.4" fill="#f0c98a" class="zv-float"></circle><circle cx="0" cy="-42" r="13" fill="#ffd79a" opacity="0.22" class="zv-lantern"></circle><circle cx="0" cy="-42" r="3.1" fill="#ffe6b8" class="zv-lantern"></circle></g></g></svg></div>
+    <figcaption>
+      <div class="label-brass">Регистрация</div>
+      <p>Снасть собрана. Осталось отойти от берега.</p>
+    </figcaption>
+  </figure>
+  </div>
+  <p class="hint">Если в системе включено «уменьшить движение», анимация замирает — так задумано. На телефоне сцена занимает верхнюю полосу экрана, на компьютере — левую колонку.</p>
+</body>
+</html>

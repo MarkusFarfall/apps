@@ -1,8 +1,7 @@
 import { migrateSave } from "./engine";
 import type { CaughtFish, SaveData } from "./types";
 
-const GUEST_KEY = "zv_player_id";
-const LEGACY_SAVE = "zv_save_v1";
+/** Локальный кэш сохранений: ключ — профиль игрока из аккаунта. Гостевого режима нет. */
 const saveKey = (pid: string) => `zv_save:${pid}`;
 
 export interface AccountUser {
@@ -16,21 +15,6 @@ export interface AccountStats {
   totalCaught: number;
   playSeconds: number;
   updatedAt: string;
-}
-
-export function getGuestId(): string {
-  let id = localStorage.getItem(GUEST_KEY);
-  if (!id) {
-    id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
-    localStorage.setItem(GUEST_KEY, id);
-  }
-  // перенос сохранения из старого формата
-  const legacy = localStorage.getItem(LEGACY_SAVE);
-  if (legacy && !localStorage.getItem(saveKey(id))) {
-    localStorage.setItem(saveKey(id), legacy);
-    localStorage.removeItem(LEGACY_SAVE);
-  }
-  return id;
 }
 
 export function loadLocal(pid: string): SaveData | null {
@@ -102,8 +86,8 @@ export async function fetchMe() {
   return { user: r.data.user, playerId: r.data.playerId ?? null, stats: r.data.stats ?? null };
 }
 
-export async function register(username: string, password: string, guestId: string) {
-  return req<{ user: AccountUser; playerId: string }>("/api/auth/register", { method: "POST", body: JSON.stringify({ username, password, guestId }) });
+export async function register(username: string, password: string) {
+  return req<{ user: AccountUser; playerId: string }>("/api/auth/register", { method: "POST", body: JSON.stringify({ username, password }) });
 }
 
 export async function login(loginName: string, password: string) {

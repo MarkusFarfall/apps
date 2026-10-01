@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     const ok = await verifyPassword(password, u?.passwordHash ?? DUMMY);
     if (!u || !ok) return fail("Неверный логин или пароль", 401);
     await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, u.id));
-    const playerId = await playerForUser(u.id, null, u.username);
+    const playerId = await playerForUser(u.id, u.username);
     await createSession(u.id);
     return json({ user: toPublic(u), playerId });
   } catch (e) {

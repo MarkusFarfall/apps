@@ -161,21 +161,10 @@ export const toPublic = (u: { id: string; username: string; createdAt: string | 
   createdAt: typeof u.createdAt === "string" ? u.createdAt : u.createdAt.toISOString(),
 });
 
-/** Игровой профиль пользователя; при отсутствии создаётся (или привязывается гостевой) */
-export async function playerForUser(userId: string, adoptGuestId?: string | null, name?: string): Promise<string> {
+/** Игровой профиль пользователя; при отсутствии создаётся */
+export async function playerForUser(userId: string, name?: string): Promise<string> {
   const own = await db.select({ id: players.id }).from(players).where(eq(players.userId, userId)).limit(1);
   if (own[0]) return own[0].id;
-  if (adoptGuestId && /^[a-zA-Z0-9-]{8,64}$/.test(adoptGuestId)) {
-    const g = await db.select({ id: players.id, userId: players.userId }).from(players).where(eq(players.id, adoptGuestId)).limit(1);
-    if (!g[0]) {
-      await db.insert(players).values({ id: adoptGuestId, userId, name: name ?? "Рыбак" });
-      return adoptGuestId;
-    }
-    if (!g[0].userId) {
-      await db.update(players).set({ userId }).where(eq(players.id, adoptGuestId));
-      return adoptGuestId;
-    }
-  }
   const id = `u-${randomUUID()}`;
   await db.insert(players).values({ id, userId, name: name ?? "Рыбак" });
   return id;
@@ -183,18 +172,15 @@ export async function playerForUser(userId: string, adoptGuestId?: string | null
 
 export const newUserId = () => `usr_${randomUUID().replace(/-/g, "")}`;
 
-export type PlayerAccess = { ok: true; exists: boolean } | { ok: false; status: number; error: string };
+export type PlayerAccess = { ok: true; exists: true } | { ok: false; status: number; error: string };
 
-/** Можно ли текущему запросу читать/писать данные игрока */
+/** Можно ли текущему запросу читать/писать данные игрока.
+ *  Гостевого режима нет: профиль принадлежит аккаунту, и трогать его может только он. */
 export async function checkPlayerAccess(playerId: string): Promise<PlayerAccess> {
   if (!/^[a-zA-Z0-9-]{8,64}$/.test(playerId)) return { ok: false, status: 400, error: "bad id" };
   const rows = await db.select({ userId: players.userId }).from(players).where(eq(players.id, playerId)).limit(1);
   const p = rows[0];
-  if (!p) {
-    if (playerId.startsWith("u-")) return { ok: false, status: 403, error: "forbidden" };
-    return { ok: true, exists: false };
-  }
-  if (!p.userId) return { ok: true, exists: true };
+  if (!p || !p.userId) return { ok: false, status: 403, error: "forbidden" };
   const u = await currentUser();
   if (!u || u.id !== p.userId) return { ok: false, status: 401, error: "Требуется вход в аккаунт" };
   return { ok: true, exists: true };

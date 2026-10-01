@@ -474,3 +474,126 @@ input {
     height: 3px;
   }
 }
+
+/* ───────── сцена входа: знакомая вода, всё нарисовано вектором ───────── */
+.zv-scene {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.zv-wave {
+  animation: zvWave 9s linear infinite;
+}
+.zv-wave-far { animation-duration: 13s; }
+.zv-wave-mid { animation-duration: 8.5s; animation-direction: reverse; }
+.zv-wave-near { animation-duration: 5.5s; }
+@keyframes zvWave {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100px); }
+}
+
+.zv-sun { animation: zvSun 11s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 100%; }
+@keyframes zvSun {
+  0%, 100% { transform: translateY(2px) scale(1); }
+  50% { transform: translateY(-4px) scale(1.03); }
+}
+
+.zv-star { animation: zvStar 4.5s ease-in-out infinite; }
+@keyframes zvStar {
+  0%, 100% { opacity: 0.16; }
+  50% { opacity: 0.92; }
+}
+
+.zv-bird { animation: zvFly 26s linear infinite; }
+@keyframes zvFly {
+  from { transform: translate(-40px, 6px); }
+  50% { transform: translate(200px, -6px); }
+  to { transform: translate(440px, 4px); }
+}
+.zv-wing { transform-box: fill-box; transform-origin: 50% 100%; animation: zvFlap 0.85s ease-in-out infinite; }
+@keyframes zvFlap {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.3); }
+}
+
+.zv-boat { transform-box: fill-box; transform-origin: 50% 94%; animation: zvBob 6.5s ease-in-out infinite; }
+@keyframes zvBob {
+  0%, 100% { transform: translateY(0) rotate(-1.6deg); }
+  50% { transform: translateY(-2.6px) rotate(1.6deg); }
+}
+
+.zv-float { transform-box: fill-box; transform-origin: 50% 0%; animation: zvFloat 3.4s ease-in-out infinite; }
+@keyframes zvFloat {
+  0%, 100% { transform: translateY(0); }
+  38% { transform: translateY(3px); }
+  62% { transform: translateY(-1.5px); }
+}
+
+.zv-lantern { animation: zvLantern 3.4s ease-in-out infinite; }
+@keyframes zvLantern {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.zv-fish { animation: zvSwim 19s linear infinite; }
+@keyframes zvSwim {
+  from { transform: translateX(-70px); }
+  to { transform: translateX(470px); }
+}
+.zv-fish-inner { animation: zvFishBob 3.8s ease-in-out infinite; }
+@keyframes zvFishBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-7px); }
+}
+.zv-tail { transform-box: fill-box; transform-origin: 100% 50%; animation: zvTail 0.45s ease-in-out infinite; }
+@keyframes zvTail {
+  0%, 100% { transform: rotate(-10deg); }
+  50% { transform: rotate(10deg); }
+}
+
+.zv-bubble { animation: zvRise 7s ease-in infinite; }
+@keyframes zvRise {
+  0% { transform: translateY(0); opacity: 0; }
+  12% { opacity: 0.5; }
+  70% { opacity: 0.32; }
+  100% { transform: translateY(-118px); opacity: 0; }
+}
+
+.zv-shimmer { animation: zvShimmer 3.6s ease-in-out infinite; }
+@keyframes zvShimmer {
+  0%, 100% { opacity: 0.22; }
+  50% { opacity: 0.72; }
+}
+
+.zv-jump { animation: zvJump 12s cubic-bezier(0.3, 0.1, 0.4, 1) infinite; }
+@keyframes zvJump {
+  0%, 58% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+  60% { opacity: 1; }
+  68% { transform: translate(-30px, -54px) rotate(-34deg); }
+  76% { transform: translate(-62px, -34px) rotate(26deg); }
+  84%, 100% { transform: translate(-92px, 8px) rotate(58deg); opacity: 0; }
+}
+.zv-splash { animation: zvSplash 12s ease-out infinite; transform-box: fill-box; transform-origin: 50% 50%; }
+@keyframes zvSplash {
+  0%, 58% { transform: scale(0.4); opacity: 0; }
+  62% { transform: scale(1.15); opacity: 0.5; }
+  70%, 100% { transform: scale(0.6); opacity: 0; }
+}
+
+/* галочка после успешного входа */
+.zv-check {
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  animation: zvCheck 0.6s ease-out 0.1s forwards;
+}
+@keyframes zvCheck {
+  to { stroke-dashoffset: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zv-scene,
+  .zv-scene * {
+    animation: none !important;
+  }
+  .zv-check { stroke-dashoffset: 0; }
+}

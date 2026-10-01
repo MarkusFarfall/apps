@@ -4,8 +4,9 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { GameAudio } from "@/game/audio";
 import { depthToU, Engine, newSave, uToDepth, type TravelMode, type Trip } from "@/game/engine";
 import { FISH } from "@/game/fish";
-import { clearLocal, deleteRemote, fetchMe, getGuestId, loadLocal, loadRemote, logCatch, logout as apiLogout, pickNewest, saveLocal, saveRemote, type AccountUser } from "@/game/persist";
-import { AccountBadge, AuthModal, ProfileModal, type AccountState } from "./Account";
+import { clearLocal, deleteRemote, fetchMe, loadLocal, loadRemote, logCatch, logout as apiLogout, pickNewest, saveLocal, saveRemote, type AccountUser } from "@/game/persist";
+import { AccountBadge, ProfileModal, type AccountState } from "./Account";
+import { AuthScreen } from "./AuthScreen";
 import { MILESTONES } from "@/game/world";
 import { CAM_MODES, Scene, type CamMode } from "@/game/render/scene";
 import { PortScene, type Building } from "@/game/render/port";
@@ -23,7 +24,7 @@ const MOON_NAMES = ["Новолуние", "Молодая луна", "Перва
 const SETTINGS_KEY = "zv_settings";
 const DEFAULT_SETTINGS: Settings = { quality: 2, sound: true, music: true, volume: 0.8 };
 
-type Boot = { state: "loading" } | { state: "title"; save: SaveData | null };
+type Boot = { state: "loading" } | { state: "auth" } | { state: "title"; save: SaveData | null };
 
 export default function Game() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -48,10 +49,8 @@ export default function Game() {
   const [view, setView] = useState({ compact: false, land: true });
   const [info, setInfo] = useState(false);
   const [account, setAccount] = useState<AccountState>({ user: null, stats: null, offline: false });
-  const [authOpen, setAuthOpen] = useState<null | "login" | "register" | "profile">(null);
+  const [authOpen, setAuthOpen] = useState<null | "profile">(null);
   const [camMode, setCamModeState] = useState<CamMode>("auto");
-  const guestRef = useRef<string>("");
-  const [guestId, setGuestId] = useState("");
   const [cloud, setCloud] = useState<string>("проверка…");
   const [, force] = useReducer((x: number) => x + 1, 0);
   const [name, setName] = useState("");
@@ -86,9 +85,6 @@ export default function Game() {
     installCanvasGuards();
     const cs = getComputedStyle(document.documentElement);
     setFonts(cs.getPropertyValue("--font-text").trim(), cs.getPropertyValue("--font-display").trim());
-    const guest = getGuestId();
-    guestRef.current = guest;
-    pidRef.current = guest;
     try {
       const cm = localStorage.getItem("zv_cam") as CamMode | null;
       if (cm && CAM_MODES.includes(cm)) { sceneRef.current.camMode = cm; setCamModeState(cm); }
@@ -109,16 +105,22 @@ export default function Game() {
     window.addEventListener("resize", onResize);
     (async () => {
       const me = await fetchMe();
-      setGuestId(guest);
-      let pid = guest;
-      if ("offline" in me) setAccount((a) => ({ ...a, offline: true }));
-      else if (me.user && me.playerId) {
-        pid = me.playerId;
-        setAccount({ user: me.user, stats: me.stats, offline: false });
+      // Гостевого режима нет: без аккаунта показываем вход.
+      if ("offline" in me) {
+        setAccount((a) => ({ ...a, offline: true }));
+        engineRef.current.s = newSave();
+        setBoot({ state: "auth" });
+        return;
       }
-      pidRef.current = pid;
-      const best = await loadBest(pid);
-      setName(best?.name ?? ("offline" in me ? "" : me.user?.username ?? ""));
+      if (!me.user || !me.playerId) {
+        engineRef.current.s = newSave();
+        setBoot({ state: "auth" });
+        return;
+      }
+      pidRef.current = me.playerId;
+      setAccount({ user: me.user, stats: me.stats, offline: false });
+      const best = await loadBest(me.playerId);
+      setName(best?.name ?? me.user.username);
       setBoot({ state: "title", save: best });
     })();
   }, [loadBest]);
@@ -169,53 +171,57 @@ export default function Game() {
 
   const onAuthed = useCallback(async (user: AccountUser, playerId: string, mode: "login" | "register") => {
     const e = engineRef.current;
-    // гостевой прогресс остаётся на устройстве
-    saveLocal(pidRef.current, e.s);
     setAuthOpen(null);
     setAccount({ user, stats: null, offline: false });
+    pidRef.current = playerId;
     if (mode === "register") {
-      pidRef.current = playerId;
+      // новая учётная запись: имя рыбака берём из имени пользователя, если своё ещё не задано
       if (!e.s.name || e.s.name === "Рыбак") e.s.name = user.username;
       saveLocal(playerId, e.s);
       await saveRemote(playerId, e.s, true);
+      setBoot({ state: "title", save: e.s });
       e.toast("Учётная запись создана", "good", "Прогресс сохраняется на сервере");
     } else {
-      pidRef.current = playerId;
       const best = await loadBest(playerId);
       if (!best) {
         e.s = newSave(user.username);
         await saveRemote(playerId, e.s, true);
       }
       setBoot({ state: "title", save: best ?? e.s });
-      if (playing) e.fade = 1;
       e.toast(`С возвращением, ${user.username}`, "good");
     }
     setName(e.s.name);
     void refreshMe();
-  }, [loadBest, refreshMe, playing]);
+  }, [loadBest, refreshMe]);
 
+  /** Выход: сохраняем прогресс на сервер и возвращаемся на экран входа. */
   const onLogout = useCallback(async () => {
     await persist(true);
     await apiLogout();
     setAccount({ user: null, stats: null, offline: false });
     setAuthOpen(null);
-    pidRef.current = guestRef.current;
-    const best = await loadBest(guestRef.current);
-    setBoot({ state: "title", save: best });
+    pidRef.current = "";
+    engineRef.current.s = newSave();
+    engineRef.current.phase = "idle";
+    setBoot({ state: "auth" });
     setPlaying(false);
     setPanel(null);
-  }, [persist, loadBest]);
+    setTravelling(null);
+    setTripReq(null);
+    setLetter(null);
+  }, [persist]);
 
   const onDeleted = useCallback(async () => {
     clearLocal(pidRef.current);
     setAccount({ user: null, stats: null, offline: false });
     setAuthOpen(null);
-    pidRef.current = guestRef.current;
-    const best = await loadBest(guestRef.current);
-    setBoot({ state: "title", save: best });
+    pidRef.current = "";
+    engineRef.current.s = newSave();
+    engineRef.current.phase = "idle";
+    setBoot({ state: "auth" });
     setPlaying(false);
     setPanel(null);
-  }, [loadBest]);
+  }, []);
 
   const setCamMode = useCallback((m: CamMode) => {
     sceneRef.current.camMode = m;
@@ -304,9 +310,9 @@ export default function Game() {
   }, [quality]);
 
   useEffect(() => {
-    engineRef.current.paused = !playing || panel !== null || letter !== null || authOpen !== null || engine.s.atPort || !!travelling || !!tripReq;
+    engineRef.current.paused = !playing || panel !== null || letter !== null || authOpen !== null || boot.state === "auth" || engine.s.atPort || !!travelling || !!tripReq;
     audioRef.current.setMuffled(playing && (panel !== null || letter !== null || authOpen !== null));
-  }, [engine, playing, panel, letter, authOpen, travelling, tripReq, engine.s.atPort]);
+  }, [engine, playing, panel, letter, authOpen, travelling, tripReq, engine.s.atPort, boot.state]);
 
   const openPanel = useCallback((p: "codex" | "journal") => {
     audioRef.current.ui("open");
@@ -459,7 +465,7 @@ export default function Game() {
       />
 
       {/* ───────── ТИТУЛ ───────── */}
-      {!playing && (
+      {!playing && boot.state !== "auth" && (
         <div className="absolute inset-0 z-50 flex items-center bg-[linear-gradient(90deg,rgba(3,7,12,0.88)_0%,rgba(3,7,12,0.55)_38%,rgba(3,7,12,0)_70%)]">
           <div className="title-in mx-6 max-h-[100dvh] max-w-[520px] overflow-y-auto py-6 sm:ml-[7vw]">
             <div className="label-brass">Симулятор морской рыбалки</div>
@@ -483,20 +489,13 @@ export default function Game() {
                 </button>
                 <div className="flex items-center justify-between border-t border-[var(--line)] pt-3">
                   <div className="text-[11px] leading-snug">
-                    {account.user ? (
-                      <><span className="dim">Учётная запись</span><br /><span className="text-[#ece6d8]">{account.user.username}</span></>
-                    ) : (
-                      <><span className="dim">Гостевой режим</span><br /><span className="muted">прогресс на этом устройстве</span></>
-                    )}
+                    <span className="dim">Учётная запись</span><br />
+                    <span className="text-[#ece6d8]">{account.user?.username ?? "—"}</span>
                   </div>
-                  {account.user ? (
+                  <div className="flex gap-1.5">
                     <button className="btn btn-sm btn-quiet" onClick={() => setAuthOpen("profile")}>Профиль</button>
-                  ) : (
-                    <div className="flex gap-1.5">
-                      <button className="btn btn-sm btn-quiet" onClick={() => setAuthOpen("login")}>Вход</button>
-                      <button className="btn btn-sm" onClick={() => setAuthOpen("register")}>Регистрация</button>
-                    </div>
-                  )}
+                    <button className="btn btn-sm" onClick={onLogout}>Выйти</button>
+                  </div>
                 </div>
                 <div className="text-[11px] dim">Сохранение: {cloud}{account.offline ? " · сервер недоступен" : ""}</div>
               </div>
@@ -508,13 +507,11 @@ export default function Game() {
         </div>
       )}
 
-      {authOpen === "login" || authOpen === "register" ? (
-        <AuthModal initial={authOpen} guestId={guestId} guestHasProgress={!account.user && (engine.s.stats.totalCaught > 0 || engine.s.stats.playSeconds > 120)} onClose={() => setAuthOpen(null)} onAuthed={onAuthed} />
-      ) : null}
+      {boot.state === "auth" && <AuthScreen onReady={onAuthed} />}
       {authOpen === "profile" && account.user && <ProfileModal account={account} sync={cloud} onClose={() => setAuthOpen(null)} onLogout={onLogout} onDeleted={onDeleted} />}
 
       {playing && engine.s.atPort && !travelling && (
-        <PortHub engine={engine} hot={portScene0.hot} compact={view.compact} onOpen={openBuilding} onTravel={requestTrip} onJournal={() => openPanel("journal")} onCodex={() => openPanel("codex")} account={account} onAccount={() => setAuthOpen(account.user ? "profile" : "login")} />
+        <PortHub engine={engine} hot={portScene0.hot} compact={view.compact} onOpen={openBuilding} onTravel={requestTrip} onJournal={() => openPanel("journal")} onCodex={() => openPanel("codex")} account={account} onAccount={() => setAuthOpen("profile")} />
       )}
       {tripReq && <TravelChoice engine={engine} trip={tripReq} onCancel={() => setTripReq(null)} onGo={startTrip} />}
       {travelling && <TravelOverlay engine={engine} trip={travelling.trip} mode={travelling.mode} onDone={finishTrip} quality={settings.quality} />}
@@ -586,7 +583,7 @@ export default function Game() {
             <div className="flex justify-end gap-1.5">
               <button className="iconbtn" onClick={cycleCam} title={`Камера: ${CAM_NAMES[camMode]} [V]`}><Icon name="target" size={15} /><span className="normal-case tracking-normal">{CAM_NAMES[camMode]}</span></button>
               <button className="iconbtn" onClick={() => setSettings({ ...settings, sound: !settings.sound })} title="Звук [M]"><Icon name={settings.sound ? "speaker" : "mute"} size={16} /></button>
-              <AccountBadge account={account} compact onClick={() => setAuthOpen(account.user ? "profile" : "login")} />
+              <AccountBadge account={account} compact onClick={() => setAuthOpen("profile")} />
               <button className="iconbtn" onClick={() => openPanel("journal")} title="Журнал [J]"><Icon name="journal" size={16} />{(engine.perkPoints > 0 || engine.hasLetter || engine.daily.tasks.some((t) => t.done && !t.claimed)) && <span className="dot" />}</button>
               <button className="iconbtn" onClick={() => openPanel("codex")} title="Кодекс [C]"><Icon name="book" size={16} /></button>
               <button className="iconbtn" onClick={openPort} title={`В порт ${PORT_BY_ID[engine.nearestPort()].name} [P]`}><Icon name="anchor" size={16} /><span className="normal-case tracking-normal">{PORT_BY_ID[engine.nearestPort()].name}</span></button>
@@ -673,8 +670,8 @@ export default function Game() {
                         <button key={m} className={`flex-1 !px-1 ${camMode === m ? "on" : ""}`} onClick={() => setCamMode(m)}>{CAM_NAMES[m]}</button>
                       ))}
                     </div>
-                    <button className="iconbtn mt-3 w-full justify-between" onClick={() => { setInfo(false); setAuthOpen(account.user ? "profile" : "login"); }}>
-                      <span className="normal-case tracking-normal">{account.user ? account.user.username : "Войти или зарегистрироваться"}</span>
+                    <button className="iconbtn mt-3 w-full justify-between" onClick={() => { setInfo(false); setAuthOpen("profile"); }}>
+                      <span className="normal-case tracking-normal">{account.user?.username ?? "Аккаунт"}</span>
                       <span className="dim normal-case tracking-normal">{cloud}</span>
                     </button>
                   </div>

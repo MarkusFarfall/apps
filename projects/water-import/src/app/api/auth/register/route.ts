@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   if (!sameOrigin(req)) return fail("forbidden", 403);
   if (!(await rateLimit("register", 10, 15 * 60_000))) return fail("Слишком много попыток. Попробуйте позже", 429);
-  const b = await body<{ username?: string; password?: string; guestId?: string }>(req);
+  const b = await body<{ username?: string; password?: string }>(req);
   if (!b) return fail("Некорректный запрос");
   const username = validateUsername(b.username);
   if (typeof username !== "string") return fail(username.error);
@@ -24,7 +24,7 @@ export async function POST(req: Request) {
       .insert(users)
       .values({ id, username, usernameLower: lower, passwordHash: await hashPassword(password), lastLoginAt: new Date() })
       .returning();
-    const playerId = await playerForUser(id, b.guestId, username);
+    const playerId = await playerForUser(id, username);
     await createSession(id);
     return json({ user: toPublic(u), playerId }, 201);
   } catch (e) {

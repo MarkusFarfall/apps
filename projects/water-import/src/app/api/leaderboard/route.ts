@@ -6,26 +6,25 @@ import { json } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
-  const scope = new URL(req.url).searchParams.get("scope") === "all" ? "all" : "accounts";
+/** Рейтинг: играют только аккаунты, поэтому список всегда по учётным записям. */
+export async function GET() {
   try {
-    const q = db
+    const rows = await db
       .select({
-        name: sql<string>`coalesce(${users.username}, ${players.name})`,
+        name: users.username,
         codexCount: saves.codexCount,
         totalCaught: saves.totalCaught,
         money: saves.money,
         level: saves.level,
         achievements: saves.achievements,
-        verified: sql<boolean>`${players.userId} is not null`,
       })
       .from(saves)
       .innerJoin(players, eq(players.id, saves.playerId))
-      .leftJoin(users, eq(users.id, players.userId));
-    const rows = await (scope === "accounts" ? q.where(isNotNull(players.userId)) : q)
+      .innerJoin(users, eq(users.id, players.userId))
+      .where(isNotNull(players.userId))
       .orderBy(desc(saves.codexCount), desc(saves.level), desc(saves.totalCaught))
       .limit(25);
-    return json({ leaders: rows.map((r) => ({ ...r, name: isClean(r.name) ? r.name : "Рыбак" })), scope });
+    return json({ leaders: rows.map((r) => ({ ...r, name: isClean(r.name) ? r.name : "Рыбак" })) });
   } catch {
     return json({ leaders: [] }, 503);
   }

@@ -10,7 +10,7 @@ export async function GET() {
   try {
     const u = await currentUser();
     if (!u) return json({ user: null });
-    const playerId = await playerForUser(u.id, null, u.username);
+    const playerId = await playerForUser(u.id, u.username);
     const st = await db.select({ level: saves.level, codexCount: saves.codexCount, totalCaught: saves.totalCaught, playSeconds: saves.playSeconds, updatedAt: saves.updatedAt }).from(saves).where(eq(saves.playerId, playerId)).limit(1);
     return json({ user: toPublic(u), playerId, stats: st[0] ?? null });
   } catch (e) {
