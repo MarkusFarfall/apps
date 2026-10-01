@@ -58,13 +58,18 @@ export default function Game() {
   const [name, setName] = useState("");
   const lastRemote = useRef(0);
   const remoteDirty = useRef(false);
+  /** Сбои звука и рендера: кадр обязан выжить, иначе игра замирает навсегда. */
+  const audioFails = useRef(0);
+  const frameFails = useRef(0);
 
   const engine = engine0;
   const audio = audio0;
   useEffect(() => {
-    const w = window as unknown as { __zv?: Engine; __zvAudio?: typeof GameAudio };
+    const w = window as unknown as { __zv?: Engine; __zvAudio?: typeof GameAudio; __zvSound?: () => unknown };
     w.__zv = engine;
     w.__zvAudio = GameAudio;
+    // Срез состояния звука — для поддержки и автотестов.
+    w.__zvSound = () => ({ ...audioRef.current.debug(), audioFails: audioFails.current, frameFails: frameFails.current });
     const vis = () => audioRef.current.setHidden(document.visibilityState === "hidden");
     document.addEventListener("visibilitychange", vis);
     return () => document.removeEventListener("visibilitychange", vis);
@@ -102,6 +107,7 @@ export default function Game() {
     audioRef.current.enabled = st.sound;
     audioRef.current.music = st.music;
     audioRef.current.volume = st.volume;
+    audioRef.current.setQuality(st.quality);
     setTouch(window.matchMedia("(pointer: coarse)").matches);
     const onResize = () => setView({ compact: window.innerWidth < 820 || window.innerHeight < 560, land: window.innerWidth >= window.innerHeight });
     onResize();
@@ -151,6 +157,7 @@ export default function Game() {
     audioRef.current.setEnabled(st.sound);
     audioRef.current.setMusic(st.music);
     audioRef.current.setVolume(st.volume);
+    audioRef.current.setQuality(st.quality);
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(st));
   }, []);
 
@@ -345,14 +352,27 @@ export default function Game() {
       // Размер canvas может оказаться нулевым (окно свёрнуто, элемент ещё не разложен).
       // Рисовать в этом случае нечего, но цикл обязан выжить.
       if (W > 0 && H > 0) {
-        if (e.s.atPort) portSceneRef.current.render(ctx, e, W, H, dt);
-        else scene.render(ctx, e, W, H, dt);
+        // Исключение в кадре раньше обрывало requestAnimationFrame навсегда:
+        // игра замирала, а звук пропадал до перезагрузки страницы.
+        try {
+          if (e.s.atPort) portSceneRef.current.render(ctx, e, W, H, dt);
+          else scene.render(ctx, e, W, H, dt);
+        } catch (err) {
+          if (frameFails.current++ < 3) console.warn("[render] кадр пропущен", err);
+        }
         // Во время заставки музыка и процедурная среда не должны продолжать
         // генерировать звук за кадром. SFX сбрасываются только в активной игре.
         if (playing && a.ready) {
-          while (e.sfx.length) a.play(e.sfx.shift()!);
-          const under = Math.max(0, Math.min(1, (scene.camY - H * 0.05) / (H * 0.35)));
-          a.update(e, dt, under);
+          try {
+            while (e.sfx.length) a.play(e.sfx.shift()!);
+            const under = Math.max(0, Math.min(1, (scene.camY - H * 0.05) / (H * 0.35)));
+            a.update(e, dt, under);
+          } catch (err) {
+            audioFails.current++;
+            if (audioFails.current === 1) console.warn("[audio] сбой звука, кадр продолжается", err);
+            if (audioFails.current === 30) { a.setEnabled(false); console.warn("[audio] звук отключён после 30 сбоев"); }
+            e.sfx.length = 0;
+          }
         } else e.sfx.length = 0;
       } else {
         e.sfx.length = 0;
@@ -366,6 +386,7 @@ export default function Game() {
   useEffect(() => {
     engineRef.current.paused = !playing || panel !== null || letter !== null || authOpen !== null || boot.state === "auth" || engine.s.atPort || !!travelling || !!tripReq;
     audioRef.current.setActive(playing);
+    audioRef.current.setUiActive(boot.state !== "loading");
     audioRef.current.setMuffled(playing && (panel !== null || letter !== null || authOpen !== null));
   }, [engine, playing, panel, letter, authOpen, travelling, tripReq, engine.s.atPort, boot.state]);
 
@@ -563,8 +584,8 @@ export default function Game() {
                     <span className="text-[#ece6d8]">{account.user?.username ?? "—"}</span>
                   </div>
                   <div className="flex gap-1.5">
-                    <button className="btn btn-sm btn-quiet" onClick={() => setAuthOpen("profile")}>Профиль</button>
-                    <button className="btn btn-sm" onClick={onLogout}>Выйти</button>
+                    <button className="btn btn-sm btn-quiet" onClick={() => { audio.ui("click"); setAuthOpen("profile"); }}>Профиль</button>
+                    <button className="btn btn-sm" onClick={() => { audio.ui("click"); void onLogout(); }}>Выйти</button>
                   </div>
                 </div>
                 <div className="text-[11px] dim">Сохранение: {cloud}{account.offline ? " · сервер недоступен" : ""}</div>
@@ -577,7 +598,7 @@ export default function Game() {
         </div>
       )}
 
-      {boot.state === "auth" && <AuthScreen onReady={onAuthed} offline={account.offline} />}
+      {boot.state === "auth" && <AuthScreen onReady={onAuthed} offline={account.offline} onUi={() => audioRef.current.ui("click")} />}
       {authOpen === "profile" && account.user && <ProfileModal account={account} sync={cloud} onClose={() => setAuthOpen(null)} onLogout={onLogout} onDeleted={onDeleted} />}
 
       {playing && engine.s.atPort && !travelling && (
