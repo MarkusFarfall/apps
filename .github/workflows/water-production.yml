@@ -119,6 +119,7 @@ jobs:
         run: |
           npm run typecheck
           npm run lint
+          npm test
 
       - name: Экономика улова
         if: steps.preflight.outputs.has_db == 'true'

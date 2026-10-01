@@ -96,9 +96,10 @@ export async function rateLimit(scope: string, limit: number, windowMs: number) 
     }
     return (row?.count ?? 1) <= limit;
   } catch (e) {
-    // база недоступна — лучше пропустить запрос, чем ронять весь сайт
+    // При сбое хранилища возвращаем отдельный статус для 503: не пропускаем запрос
+    // мимо защиты от перебора, но и не называем отказ базы «слишком частыми попытками».
     console.error("[rate-limit]", e);
-    return true;
+    return null;
   }
 }
 

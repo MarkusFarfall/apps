@@ -476,6 +476,13 @@ input {
 }
 
 /* ───────── сцена входа: знакомая вода, всё нарисовано вектором ───────── */
+.auth-scene-panel {
+  height: clamp(132px, 24vh, 184px);
+  height: clamp(132px, 24svh, 184px);
+}
+@media (min-width: 768px) {
+  .auth-scene-panel { height: auto; }
+}
 .zv-scene {
   display: block;
   width: 100%;
@@ -516,6 +523,15 @@ input {
   50% { transform: scaleY(0.3); }
 }
 
+.zv-boat-drift {
+  transform-box: fill-box;
+  transform-origin: 50% 90%;
+  animation: zvBoatDrift 8s ease-in-out infinite;
+}
+@keyframes zvBoatDrift {
+  0%, 100% { transform: translateX(-3px) rotate(-0.25deg); }
+  50% { transform: translateX(4px) rotate(0.25deg); }
+}
 .zv-boat { transform-box: fill-box; transform-origin: 50% 94%; animation: zvBob 6.5s ease-in-out infinite; }
 @keyframes zvBob {
   0%, 100% { transform: translateY(0) rotate(-1.6deg); }
@@ -563,6 +579,16 @@ input {
 @keyframes zvShimmer {
   0%, 100% { opacity: 0.22; }
   50% { opacity: 0.72; }
+}
+.zv-light-ripple {
+  opacity: 0.12;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: zvLightRipple 4.8s ease-in-out infinite;
+}
+@keyframes zvLightRipple {
+  0%, 100% { opacity: 0.12; transform: translateX(-2px) scaleX(0.68); }
+  50% { opacity: 0.62; transform: translateX(3px) scaleX(1.08); }
 }
 
 .zv-jump { animation: zvJump 12s cubic-bezier(0.3, 0.1, 0.4, 1) infinite; }

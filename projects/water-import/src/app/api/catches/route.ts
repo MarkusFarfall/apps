@@ -10,7 +10,9 @@ const LOCS = new Set(["bay", "estuary", "cape", "skerries", "fjord", "kelp", "re
 
 export async function POST(req: Request) {
   if (!sameOrigin(req)) return fail("forbidden", 403);
-  if (!(await rateLimit("catch", 40, 60_000))) return fail("slow down", 429);
+  const limited = await rateLimit("catch", 40, 60_000);
+  if (limited === null) return fail("Сервер временно недоступен", 503);
+  if (!limited) return fail("slow down", 429);
   const b = await body<{ playerId?: string; fishId?: string; weight?: number; variant?: string | null; locationId?: string; gameDay?: number }>(req);
   if (!b?.playerId || !b.fishId || typeof b.weight !== "number" || !b.locationId) return fail("bad payload");
   const f = FISH_BY_ID[b.fishId];

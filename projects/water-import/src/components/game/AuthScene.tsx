@@ -15,7 +15,7 @@ export function AuthScene({ mode = "login" }: { mode?: "login" | "register" }) {
   const boat = home ? "translate(196 252) scale(-1 1)" : "translate(196 252)";
 
   return (
-    <svg className="zv-scene" viewBox="0 0 400 400" preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false">
+    <svg className="zv-scene" viewBox="0 0 400 400" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
       <defs>
         <linearGradient id="zv-sky-home" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#070d1c" />
@@ -96,10 +96,17 @@ export function AuthScene({ mode = "login" }: { mode?: "login" | "register" }) {
       <path className="zv-wave zv-wave-mid" fill="#1a2739" d="M-100 272q25-9 50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0V400H-100Z" />
       <path className="zv-wave zv-wave-near" fill="#0b1420" d="M-100 300q25-11 50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0V400H-100Z" />
 
-      {/* блики на воде */}
+      {/* дорожка солнечного света: короткие блики движутся по воде */}
       <g fill="#ffd9a0">
         {[[268, 262, 26], [286, 276, 18], [258, 290, 22], [292, 306, 14], [272, 322, 20]].map(([x, y, w], i) => (
           <rect key={i} x={x} y={y} width={w} height="1.8" rx="0.9" className="zv-shimmer" style={{ animationDelay: `${i * 0.42}s` }} />
+        ))}
+      </g>
+      <g fill="none" stroke="#fff0d1" strokeLinecap="round" strokeWidth="1.2">
+        {[
+          [281, 268, 23], [275, 284, 15], [292, 300, 19], [263, 315, 13],
+        ].map(([x, y, w], i) => (
+          <path key={i} d={`M${x} ${y}h${w}`} className="zv-light-ripple" style={{ animationDelay: `${i * 0.8}s` }} />
         ))}
       </g>
 
@@ -133,24 +140,26 @@ export function AuthScene({ mode = "login" }: { mode?: "login" | "register" }) {
         </g>
       </g>
 
-      {/* лодка */}
+      {/* лодка: лёгкий дрейф в сторону выхода или возвращения */}
       <g transform={boat}>
-        <g className="zv-boat">
-          <ellipse cx="0" cy="18" rx="52" ry="7" fill="#050a12" opacity="0.45" />
-          <path d="M-46 0q7 17 46 17t46-17z" fill="url(#zv-hull)" />
-          <path d="M-46 0h92" stroke="#6b5a44" strokeWidth="1.6" opacity="0.8" />
-          <path d="M-2 0V-84" stroke="#241f1b" strokeWidth="3.2" strokeLinecap="round" />
-          <path d="M1-80l44 70H1z" fill="url(#zv-sail)" opacity="0.96" />
-          <path d="M-3-72l-34 64h34z" fill="url(#zv-sail-back)" opacity="0.85" />
-          {/* рыбак на корме */}
-          <circle cx="-26" cy="-16" r="6.2" fill="#0b0f16" />
-          <path d="M-26-9q5 7 4 14h-9q-1-7 5-14z" fill="#0b0f16" />
-          <path d="M-21-17l44-30" stroke="#161c27" strokeWidth="1.9" strokeLinecap="round" />
-          <path d="M23-47q10 44 3 78" fill="none" stroke="#cdd9e4" strokeWidth="0.9" opacity="0.45" />
-          <circle cx="26" cy="31" r="2.4" fill="#f0c98a" className="zv-float" />
-          {/* фонарь на мачте */}
-          <circle cx="0" cy="-42" r="13" fill={glow} opacity="0.22" className="zv-lantern" />
-          <circle cx="0" cy="-42" r="3.1" fill="#ffe6b8" className="zv-lantern" />
+        <g className="zv-boat-drift" style={{ animationDirection: home ? "reverse" : "normal" }}>
+          <g className="zv-boat">
+            <ellipse cx="0" cy="18" rx="52" ry="7" fill="#050a12" opacity="0.45" />
+            <path d="M-46 0q7 17 46 17t46-17z" fill="url(#zv-hull)" />
+            <path d="M-46 0h92" stroke="#6b5a44" strokeWidth="1.6" opacity="0.8" />
+            <path d="M-2 0V-84" stroke="#241f1b" strokeWidth="3.2" strokeLinecap="round" />
+            <path d="M1-80l44 70H1z" fill="url(#zv-sail)" opacity="0.96" />
+            <path d="M-3-72l-34 64h34z" fill="url(#zv-sail-back)" opacity="0.85" />
+            {/* рыбак на корме */}
+            <circle cx="-26" cy="-16" r="6.2" fill="#0b0f16" />
+            <path d="M-26-9q5 7 4 14h-9q-1-7 5-14z" fill="#0b0f16" />
+            <path d="M-21-17l44-30" stroke="#161c27" strokeWidth="1.9" strokeLinecap="round" />
+            <path d="M23-47q10 44 3 78" fill="none" stroke="#cdd9e4" strokeWidth="0.9" opacity="0.45" />
+            <circle cx="26" cy="31" r="2.4" fill="#f0c98a" className="zv-float" />
+            {/* фонарь на мачте */}
+            <circle cx="0" cy="-42" r="13" fill={glow} opacity="0.22" className="zv-lantern" />
+            <circle cx="0" cy="-42" r="3.1" fill="#ffe6b8" className="zv-lantern" />
+          </g>
         </g>
       </g>
     </svg>

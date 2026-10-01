@@ -4,7 +4,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { GameAudio } from "@/game/audio";
 import { depthToU, Engine, newSave, uToDepth, type TravelMode, type Trip } from "@/game/engine";
 import { FISH } from "@/game/fish";
-import { clearLocal, deleteRemote, fetchMe, loadLocal, loadRemote, logCatch, logout as apiLogout, pickNewest, saveLocal, saveRemote, type AccountUser } from "@/game/persist";
+import { clearLocal, deleteRemote, fetchMe, forgetRememberedAccount, loadLocal, loadRemote, loadRememberedAccount, logCatch, logout as apiLogout, pickNewest, rememberAccount, saveLocal, saveRemote, type AccountUser } from "@/game/persist";
 import { AccountBadge, ProfileModal, type AccountState } from "./Account";
 import { AuthScreen } from "./AuthScreen";
 import { MILESTONES } from "@/game/world";
@@ -74,6 +74,7 @@ export default function Game() {
     const remote = await loadRemote(pid);
     setCloud(remote === undefined ? "только на устройстве" : "сервер и устройство");
     const best = pickNewest(local, remote);
+    if (best) saveLocal(pid, best);
     engineRef.current.s = best ?? newSave();
     engineRef.current.phase = "idle";
     return best;
@@ -105,19 +106,33 @@ export default function Game() {
     window.addEventListener("resize", onResize);
     (async () => {
       const me = await fetchMe();
-      // Гостевого режима нет: без аккаунта показываем вход.
+      // Если сеть или база недоступны, можно продолжить сохранённую на этом устройстве игру.
+      // Локальный маркер содержит только имя и id профиля — не пароль и не токен сессии.
       if ("offline" in me) {
+        const remembered = loadRememberedAccount();
+        const local = remembered ? loadLocal(remembered.playerId) : null;
+        if (remembered && local) {
+          pidRef.current = remembered.playerId;
+          engineRef.current.s = local;
+          setAccount({ user: remembered.user, stats: null, offline: true });
+          setCloud("только на устройстве");
+          setName(local.name || remembered.user.username);
+          setBoot({ state: "title", save: local });
+          return;
+        }
         setAccount((a) => ({ ...a, offline: true }));
         engineRef.current.s = newSave();
         setBoot({ state: "auth" });
         return;
       }
       if (!me.user || !me.playerId) {
+        forgetRememberedAccount();
         engineRef.current.s = newSave();
         setBoot({ state: "auth" });
         return;
       }
       pidRef.current = me.playerId;
+      rememberAccount(me.playerId, me.user);
       setAccount({ user: me.user, stats: me.stats, offline: false });
       const best = await loadBest(me.playerId);
       setName(best?.name ?? me.user.username);
@@ -145,6 +160,7 @@ export default function Game() {
     const r = await saveRemote(pid, e.s);
     if (r.ok) {
       setCloud("сервер и устройство");
+      setAccount((a) => a.offline ? { ...a, offline: false } : a);
       remoteDirty.current = false;
     } else if (r.conflict) {
       // на сервере более свежий прогресс (другое устройство)
@@ -174,6 +190,7 @@ export default function Game() {
     setAuthOpen(null);
     setAccount({ user, stats: null, offline: false });
     pidRef.current = playerId;
+    rememberAccount(playerId, user);
     if (mode === "register") {
       // новая учётная запись: имя рыбака берём из имени пользователя, если своё ещё не задано
       if (!e.s.name || e.s.name === "Рыбак") e.s.name = user.username;
@@ -185,6 +202,7 @@ export default function Game() {
       const best = await loadBest(playerId);
       if (!best) {
         e.s = newSave(user.username);
+        saveLocal(playerId, e.s);
         await saveRemote(playerId, e.s, true);
       }
       setBoot({ state: "title", save: best ?? e.s });
@@ -198,6 +216,7 @@ export default function Game() {
   const onLogout = useCallback(async () => {
     await persist(true);
     await apiLogout();
+    forgetRememberedAccount();
     setAccount({ user: null, stats: null, offline: false });
     setAuthOpen(null);
     pidRef.current = "";
@@ -213,6 +232,7 @@ export default function Game() {
 
   const onDeleted = useCallback(async () => {
     clearLocal(pidRef.current);
+    forgetRememberedAccount();
     setAccount({ user: null, stats: null, offline: false });
     setAuthOpen(null);
     pidRef.current = "";
@@ -507,7 +527,7 @@ export default function Game() {
         </div>
       )}
 
-      {boot.state === "auth" && <AuthScreen onReady={onAuthed} />}
+      {boot.state === "auth" && <AuthScreen onReady={onAuthed} offline={account.offline} />}
       {authOpen === "profile" && account.user && <ProfileModal account={account} sync={cloud} onClose={() => setAuthOpen(null)} onLogout={onLogout} onDeleted={onDeleted} />}
 
       {playing && engine.s.atPort && !travelling && (

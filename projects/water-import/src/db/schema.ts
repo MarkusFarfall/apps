@@ -41,7 +41,7 @@ export const sessions = pgTable(
   (t) => [index("sessions_user_idx").on(t.userId), index("sessions_expires_idx").on(t.expiresAt)],
 );
 
-// Игровой профиль. Гость — анонимный UUID; после регистрации привязывается к пользователю
+// Игровой профиль пользователя. Гостевого режима нет.
 export const players = pgTable(
   "players",
   {

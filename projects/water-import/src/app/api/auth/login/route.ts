@@ -10,7 +10,9 @@ const DUMMY = "scrypt$16384$AAAAAAAAAAAAAAAAAAAAAA$" + "A".repeat(86);
 
 export async function POST(req: Request) {
   if (!sameOrigin(req)) return fail("forbidden", 403);
-  if (!(await rateLimit("login", 20, 10 * 60_000))) return fail("Слишком много попыток. Попробуйте через несколько минут", 429);
+  const limited = await rateLimit("login", 20, 10 * 60_000);
+  if (limited === null) return fail("Сервер временно недоступен", 503);
+  if (!limited) return fail("Слишком много попыток. Попробуйте через несколько минут", 429);
   const b = await body<{ login?: string; password?: string }>(req);
   const login = typeof b?.login === "string" ? b.login.trim().toLowerCase() : "";
   const password = typeof b?.password === "string" ? b.password : "";
