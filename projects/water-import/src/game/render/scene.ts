@@ -60,6 +60,7 @@ export class Scene {
   private t = 0;
   private W = 0;
   private H = 0;
+  private initQuality = -1;
   private spotKey = "";
   private bolt: [number, number][] = [];
   private lastLightning = 0;
@@ -68,13 +69,17 @@ export class Scene {
   private whaleX = -500;
 
   private init(W: number, H: number) {
-    if (W === this.W && H === this.H) return;
+    if (W === this.W && H === this.H && this.initQuality === this.quality) return;
     this.W = W;
     this.H = H;
+    this.initQuality = this.quality;
     const r = rng(9);
-    this.drops = Array.from({ length: 520 }, () => ({ x: r() * W, y: r() * H, v: 750 + r() * 500, l: 10 + r() * 18 }));
-    this.flakes = Array.from({ length: 280 }, () => ({ x: r() * W, y: r() * H, v: 30 + r() * 50, l: 0.8 + r() * 2.4 }));
-    this.snow = Array.from({ length: 130 }, () => [r() * W, r() * 3000, 0.5 + r() * 1.6]);
+    const rainN = this.quality >= 2 ? 520 : this.quality === 1 ? 320 : 160;
+    const flakeN = this.quality >= 2 ? 280 : this.quality === 1 ? 170 : 90;
+    const snowN = this.quality >= 2 ? 130 : this.quality === 1 ? 80 : 45;
+    this.drops = Array.from({ length: rainN }, () => ({ x: r() * W, y: r() * H, v: 750 + r() * 500, l: 10 + r() * 18 }));
+    this.flakes = Array.from({ length: flakeN }, () => ({ x: r() * W, y: r() * H, v: 30 + r() * 50, l: 0.8 + r() * 2.4 }));
+    this.snow = Array.from({ length: snowN }, () => [r() * W, r() * 3000, 0.5 + r() * 1.6]);
   }
 
   render(ctx: CanvasRenderingContext2D, e: Engine, W: number, H: number, dt: number) {
@@ -887,7 +892,7 @@ export class Scene {
       ctx.rect(0, 0, W, surf + 4);
       ctx.clip();
       if (weather === "rain" || weather === "storm") {
-        const n = weather === "storm" ? 520 : 280;
+        const n = Math.min(this.drops.length, weather === "storm" ? 520 : 280);
         const wind = e.s.wind * 0.6 + 0.15;
         ctx.strokeStyle = night > 0.5 ? "rgba(170,190,220,0.35)" : "rgba(210,225,240,0.42)";
         ctx.lineWidth = 1;

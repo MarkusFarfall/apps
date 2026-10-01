@@ -73,6 +73,8 @@ export class GameAudio {
   private chordIdx = 0;
   private musicKey = "";
   private pianoQueue: number[] = [];
+  private updateAcc = 0;
+  private active = true;
 
   enabled = true;
   music = true;
@@ -142,7 +144,7 @@ export class GameAudio {
     this.musicFilter.type = "lowpass";
     this.musicFilter.frequency.value = 9000;
     this.musicBus = ctx.createGain();
-    this.musicBus.gain.value = this.music ? 0.55 : 0;
+    this.musicBus.gain.value = this.music && this.active ? 0.55 : 0;
     this.musicBus.connect(this.musicFilter);
     this.musicFilter.connect(this.master);
     const mSend = ctx.createGain();
@@ -301,13 +303,24 @@ export class GameAudio {
     this.enabled = on;
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    this.ambBus.gain.setTargetAtTime(on ? 1 : 0, t, 0.15);
-    this.sfxBus.gain.setTargetAtTime(on ? 1 : 0, t, 0.15);
-    this.uiBus.gain.setTargetAtTime(on ? 0.6 : 0, t, 0.15);
+    this.ambBus.gain.setTargetAtTime(on && this.active ? 1 : 0, t, 0.15);
+    this.sfxBus.gain.setTargetAtTime(on && this.active ? 1 : 0, t, 0.15);
+    this.uiBus.gain.setTargetAtTime(on && this.active ? 0.6 : 0, t, 0.15);
   }
   setMusic(on: boolean) {
     this.music = on;
-    if (this.ctx) this.musicBus.gain.setTargetAtTime(on ? 0.55 : 0, this.ctx.currentTime, 0.5);
+    if (this.ctx) this.musicBus.gain.setTargetAtTime(on && this.active ? 0.55 : 0, this.ctx.currentTime, 0.5);
+  }
+  /** Вне игры процедурная среда молчит, но сам AudioContext не пересоздаётся. */
+  setActive(on: boolean) {
+    this.active = on;
+    this.updateAcc = 0;
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.ambBus.gain.setTargetAtTime(on && this.enabled ? 1 : 0, t, 0.18);
+    this.sfxBus.gain.setTargetAtTime(on && this.enabled ? 1 : 0, t, 0.18);
+    this.musicBus.gain.setTargetAtTime(on && this.music ? 0.55 : 0, t, 0.35);
+    this.uiBus.gain.setTargetAtTime(on && this.enabled ? 0.6 : 0, t, 0.18);
   }
   /** Приглушение мира, пока открыто окно интерфейса */
   setMuffled(on: boolean) {
@@ -427,7 +440,7 @@ export class GameAudio {
   }
 
   ui(kind: UiSound) {
-    if (!this.ctx || !this.enabled) return;
+    if (!this.ctx || !this.enabled || !this.active) return;
     switch (kind) {
       case "click": this.burst({ type: "bandpass", f: 3200, q: 2, g: 0.08, d: 0.025, bus: this.uiBus }); break;
       case "open": this.burst({ buf: this.pink, type: "bandpass", f: 500, f2: 1400, q: 0.8, g: 0.07, a: 0.05, d: 0.22, bus: this.uiBus }); break;
@@ -443,7 +456,7 @@ export class GameAudio {
   }
 
   play(s: Sfx) {
-    if (!this.ctx) return;
+    if (!this.ctx || !this.active) return;
     if (!this.enabled && !["catch", "newSpecies", "legend", "levelUp", "quest"].includes(s)) return;
     switch (s) {
       case "cast":
@@ -627,7 +640,14 @@ export class GameAudio {
 
   // ─────────── кадр ───────────
   update(e: Engine, dt: number, under: number) {
-    if (!this.ctx) return;
+    if (!this.ctx || !this.active) return;
+    // Параметры ambience не требуют 60 обновлений в секунду. Ограничение
+    // управляющего цикла до 30 Гц снижает число AudioParam-вызовов и частоту
+    // рождения коротких rain/reel-узлов, не меняя само звучание.
+    this.updateAcc += dt;
+    if (this.updateAcc < 1 / 30) return;
+    dt = this.updateAcc;
+    this.updateAcc = 0;
     const ctx = this.ctx;
     const now = ctx.currentTime;
     const w = WEATHER_INFO[e.s.weather];

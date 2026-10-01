@@ -47,7 +47,7 @@ export function AuthScreen({ onReady, offline = false }: { onReady: (user: Accou
       <div className="reveal relative flex h-full min-h-0 w-full max-w-[1000px] flex-col overflow-hidden border border-[var(--line-2)] bg-[#050c14] sm:h-auto sm:max-h-[94vh] sm:rounded-[4px] md:flex-row">
         {/* ── сцена ── */}
         <div className="auth-scene-panel relative w-full shrink-0 overflow-hidden md:w-[46%]">
-          <AuthScene mode={mode} />
+          <AuthScene key={mode} mode={mode} />
           <div className="absolute inset-0 bg-[linear-gradient(to_top,rgba(3,7,12,0.85)_0%,rgba(3,7,12,0)_55%)]" />
           <div className="absolute inset-x-0 bottom-0 p-5 sm:p-6">
             <div className="label-brass">Знакомая вода</div>

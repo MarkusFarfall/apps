@@ -185,8 +185,12 @@ export function migrateSave(raw: unknown): SaveData | null {
     s.boat = s.boatsOwned[s.boatsOwned.length - 1];
   }
   if (!Array.isArray(s.boatsOwned) || !s.boatsOwned.length) s.boatsOwned = [0];
-  if (!s.market || typeof s.market !== "object" || typeof s.market.sold !== "object") s.market = { day: 1, sold: {} };
+  if (!s.market || typeof s.market !== "object" || typeof s.market.sold !== "object") s.market = { day: 1, sold: {}, byPort: {} };
   if (!PORT_BY_ID[s.port]) s.port = "home";
+  // До версии с отдельным насыщением портов в сохранении был только один
+  // счётчик. Сохраняем его за текущим портом и дальше ведём корзины отдельно.
+  if (!s.market.byPort || typeof s.market.byPort !== "object") s.market.byPort = {};
+  if (!s.market.byPort[s.port]) s.market.byPort[s.port] = s.market.sold;
   const known = new Set<PortId>(Array.isArray(s.portsKnown) ? s.portsKnown.filter((p) => PORT_BY_ID[p]) : []);
   known.add("home");
   for (const p of PORTS) if (p.serves.some((l) => s.flags.includes(`visit_${l}`))) known.add(p.id);
@@ -1432,7 +1436,11 @@ export class Engine {
   sellOne(uid: string) {
     const i = this.s.cooler.findIndex((c) => c.uid === uid);
     if (i < 0) return;
-    const v = this.marketValue(this.s.cooler[i]);
+    // Одиночная продажа должна использовать ту же котировку, что и таблица
+    // рынка и «Продать всё». Иначе можно было продавать один и тот же вид
+    // по полной цене и обходить дневное насыщение рынка.
+    const quote = this.coolerQuote();
+    const v = quote.get(uid) ?? this.marketValue(this.s.cooler[i]);
     this.recordSale(this.s.cooler[i].fishId);
     this.dailyEvent({ k: "sell", amount: v, count: 1, port: this.s.port });
     this.s.money += v;

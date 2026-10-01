@@ -1,166 +1,227 @@
 "use client";
 
+import type { CSSProperties } from "react";
+
 /**
- * Сцена входа: знакомая вода на закате (вход) или на рассвете (регистрация).
- *
- * Всё нарисовано вектором прямо здесь — ни картинок, ни внешних библиотек.
- * Двигаются только transform и opacity, поэтому анимация не грузит процессор
- * даже на телефоне. При системной настройке «меньше движения» она замирает
- * (см. .zv-scene в globals.css).
+ * Сцена входа в игру. Это небольшой векторный «живой экран», а не иллюстрация:
+ * несколько планов двигаются с разной скоростью, а лодка, рыба, волны и свет
+ * создают ощущение настоящего игрового мира. Картинок и внешних библиотек нет.
  */
 export function AuthScene({ mode = "login" }: { mode?: "login" | "register" }) {
-  const home = mode === "login"; // вход — лодка возвращается домой, регистрация — уходит в море
-  const sky = home ? "url(#zv-sky-home)" : "url(#zv-sky-out)";
-  const glow = home ? "#ffb066" : "#ffd79a";
-  const boat = home ? "translate(196 252) scale(-1 1)" : "translate(196 252)";
+  const home = mode === "login";
+  const palette = home
+    ? {
+        top: "#070b1a",
+        mid: "#1b2742",
+        horizon: "#714955",
+        glow: "#f0a05f",
+        waterTop: "#20344d",
+        waterBottom: "#07111d",
+        land: "#101b25",
+        boat: "#6f4c32",
+        trim: "#d1a76b",
+        fish: "#527d92",
+      }
+    : {
+        top: "#071221",
+        mid: "#17405b",
+        horizon: "#b87859",
+        glow: "#ffd38e",
+        waterTop: "#1b5268",
+        waterBottom: "#06131e",
+        land: "#172b2b",
+        boat: "#7b5233",
+        trim: "#e0bd78",
+        fish: "#609c8d",
+      };
+  const boatStyle = { "--zv-auth-boat-dir": home ? -1 : 1 } as CSSProperties;
 
   return (
-    <svg className="zv-scene" viewBox="0 0 400 400" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+    <svg
+      className="zv-scene"
+      viewBox="0 0 640 460"
+      preserveAspectRatio="xMidYMid slice"
+      aria-hidden="true"
+      focusable="false"
+    >
       <defs>
-        <linearGradient id="zv-sky-home" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#070d1c" />
-          <stop offset="46%" stopColor="#1b2740" />
-          <stop offset="78%" stopColor="#5c3f45" />
-          <stop offset="100%" stopColor="#b9713f" />
+        <linearGradient id="zv-auth-sky" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor={palette.top} />
+          <stop offset="0.52" stopColor={palette.mid} />
+          <stop offset="0.82" stopColor={palette.horizon} />
+          <stop offset="1" stopColor="#d18a5d" />
         </linearGradient>
-        <linearGradient id="zv-sky-out" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#050b18" />
-          <stop offset="44%" stopColor="#152a44" />
-          <stop offset="76%" stopColor="#3f5566" />
-          <stop offset="100%" stopColor="#c78a54" />
+        <linearGradient id="zv-auth-water" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor={palette.waterTop} />
+          <stop offset="0.45" stopColor="#102b3e" />
+          <stop offset="1" stopColor={palette.waterBottom} />
         </linearGradient>
-        <radialGradient id="zv-sun" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#fff4dd" stopOpacity="0.98" />
-          <stop offset="45%" stopColor={glow} stopOpacity="0.75" />
-          <stop offset="100%" stopColor={glow} stopOpacity="0" />
+        <linearGradient id="zv-auth-hull" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor={palette.boat} />
+          <stop offset="0.7" stopColor="#3c281f" />
+          <stop offset="1" stopColor="#161118" />
+        </linearGradient>
+        <linearGradient id="zv-auth-cabin" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#d3b57f" />
+          <stop offset="1" stopColor="#806042" />
+        </linearGradient>
+        <linearGradient id="zv-auth-cloud" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#b7c4d6" stopOpacity="0.28" />
+          <stop offset="1" stopColor="#56667d" stopOpacity="0" />
+        </linearGradient>
+        <radialGradient id="zv-auth-sun-glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0" stopColor="#fff7dc" stopOpacity="0.98" />
+          <stop offset="0.22" stopColor={palette.glow} stopOpacity="0.82" />
+          <stop offset="1" stopColor={palette.glow} stopOpacity="0" />
         </radialGradient>
-        <linearGradient id="zv-water" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={home ? "#243349" : "#1c2c40"} />
-          <stop offset="55%" stopColor="#0d1725" />
-          <stop offset="100%" stopColor="#050a12" />
+        <linearGradient id="zv-auth-light-road" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor={palette.glow} stopOpacity="0.46" />
+          <stop offset="1" stopColor={palette.glow} stopOpacity="0" />
         </linearGradient>
-        <linearGradient id="zv-wash" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={glow} stopOpacity="0.5" />
-          <stop offset="100%" stopColor={glow} stopOpacity="0" />
+        <linearGradient id="zv-auth-glass" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#d7f0ed" stopOpacity="0.75" />
+          <stop offset="1" stopColor="#60949c" stopOpacity="0.35" />
         </linearGradient>
-        <linearGradient id="zv-hull" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#2f2a26" />
-          <stop offset="100%" stopColor="#120f0d" />
-        </linearGradient>
-        <linearGradient id="zv-sail" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#f4ead6" />
-          <stop offset="100%" stopColor="#cbb894" />
-        </linearGradient>
-        <linearGradient id="zv-sail-back" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#ded0b4" />
-          <stop offset="100%" stopColor="#a38f6d" />
-        </linearGradient>
+        <filter id="zv-auth-soft-glow" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur stdDeviation="7" />
+        </filter>
       </defs>
 
-      {/* небо */}
-      <rect x="0" y="0" width="400" height="252" fill={sky} />
+      {/* Небо и дальний свет */}
+      <rect width="640" height="286" fill="url(#zv-auth-sky)" />
+      <g className="zv-auth-orb">
+        <circle cx="500" cy={home ? 98 : 188} r="66" fill="url(#zv-auth-sun-glow)" filter="url(#zv-auth-soft-glow)" />
+        <circle cx="500" cy={home ? 98 : 188} r={home ? 22 : 27} fill="#fff5d9" opacity="0.96" />
+        {home && <circle cx="493" cy="91" r="3" fill="#d5bcaa" opacity="0.45" />}
+        {home && <circle cx="510" cy="106" r="2" fill="#d5bcaa" opacity="0.35" />}
+      </g>
 
-      {/* звёзды */}
-      <g fill="#fdf6e6">
+      {/* Звёздная карта: на рассвете они почти исчезают */}
+      <g fill="#fff5dc" opacity={home ? 0.82 : 0.22}>
         {[
-          [34, 34, 1.1], [72, 62, 0.8], [118, 26, 1], [166, 74, 0.7], [206, 38, 0.9],
-          [252, 66, 0.75], [296, 28, 1.05], [338, 58, 0.8], [372, 96, 0.7], [46, 116, 0.75],
-          [150, 128, 0.6], [268, 118, 0.65],
+          [38, 44, 1.4], [87, 82, 1], [136, 31, 1.2], [185, 68, 0.8], [238, 38, 1.1],
+          [286, 94, 0.8], [342, 54, 1.3], [404, 30, 0.8], [452, 74, 1], [556, 45, 1.1],
+          [605, 116, 0.8], [75, 142, 0.7], [260, 132, 0.65], [384, 122, 0.75],
         ].map(([cx, cy, r], i) => (
-          <circle key={i} cx={cx} cy={cy} r={r} className="zv-star" style={{ animationDelay: `${(i * 0.53).toFixed(2)}s` }} />
+          <circle key={i} cx={cx} cy={cy} r={r} className="zv-auth-star" style={{ animationDelay: `${(i * 0.37).toFixed(2)}s` }} />
         ))}
       </g>
 
-      {/* солнце и его дорожка на воде */}
-      <g className="zv-sun">
-        <circle cx="300" cy="228" r="66" fill="url(#zv-sun)" />
-        <circle cx="300" cy="228" r="17" fill="#fff6e4" opacity="0.92" />
+      {/* Облака создают глубину и медленно проходят перед светом */}
+      <g className="zv-auth-cloud zv-auth-cloud-back" opacity={home ? 0.28 : 0.2}>
+        <path d="M-80 145c55-30 88-13 119-28 36-18 69-3 73 15 48-12 82 2 91 25H-80z" fill="url(#zv-auth-cloud)" />
       </g>
-      <rect x="252" y="254" width="96" height="86" fill="url(#zv-wash)" opacity="0.5" />
-
-      {/* птицы */}
-      <g className="zv-bird" style={{ animationDuration: home ? "30s" : "24s" }}>
-        {[0, 34].map((dx, i) => (
-          <g key={i} transform={`translate(${96 + dx} ${102 + i * 12})`}>
-            <path d="M-9 0q9-6 18 0" fill="none" stroke="#1b2536" strokeWidth="1.7" strokeLinecap="round" className="zv-wing" style={{ animationDelay: `${i * 0.22}s` }} />
-            <path d="M9 0q9-6 18 0" fill="none" stroke="#1b2536" strokeWidth="1.7" strokeLinecap="round" className="zv-wing" style={{ animationDelay: `${i * 0.22 + 0.08}s` }} />
-          </g>
-        ))}
+      <g className="zv-auth-cloud zv-auth-cloud-front" opacity={home ? 0.2 : 0.3}>
+        <path d="M300 178c38-25 66-9 88-21 32-17 62-2 69 17 35-10 83 3 99 25H268z" fill="url(#zv-auth-cloud)" />
       </g>
 
-      {/* вода: три слоя волн с разной скоростью */}
-      <rect x="0" y="248" width="400" height="152" fill="url(#zv-water)" />
-      <g opacity="0.55">
-        <path className="zv-wave zv-wave-far" fill="#2b3d55" d="M-100 252q25-7 50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0V400H-100Z" />
+      {/* Дальний берег, маяк и горы */}
+      <path d="M0 246 70 217l32 15 45-32 57 34 52-23 52 24 54-18 61 29 56-20 57 20 66-30 38 24v58H0z" fill="#182536" opacity="0.72" />
+      <path d="M0 255c62-17 111-15 163 1 44 13 83-2 126 4 58 8 95-13 147-2 66 14 125-7 204 2v34H0z" fill={palette.land} opacity="0.92" />
+      <g className="zv-auth-lighthouse" transform="translate(104 202)">
+        <path d="M-9 54 0-2 9 54z" fill="#24333d" />
+        <rect x="-6" y="11" width="12" height="6" fill="#d9d5c5" opacity="0.82" />
+        <rect x="-7" y="-8" width="14" height="7" rx="1" fill="#d7d0bd" />
+        <path d="M-11-9h22" stroke="#241b1c" strokeWidth="2" />
+        <circle cx="0" cy="-5" r="3" fill={palette.glow} className="zv-auth-lantern" />
+        <path d="M0-5 63-24M0-5 53 16" stroke={palette.glow} strokeOpacity="0.12" strokeWidth="7" />
       </g>
-      <path className="zv-wave zv-wave-mid" fill="#1a2739" d="M-100 272q25-9 50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0V400H-100Z" />
-      <path className="zv-wave zv-wave-near" fill="#0b1420" d="M-100 300q25-11 50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0V400H-100Z" />
+      <g fill="#0b121d" opacity="0.55">
+        <path d="M170 232q13-16 27 0v8h-27z" />
+        <path d="M185 226q10-12 20 0v7h-20z" />
+        <path d="M550 231q14-15 28 0v8h-28z" />
+      </g>
 
-      {/* дорожка солнечного света: короткие блики движутся по воде */}
-      <g fill="#ffd9a0">
-        {[[268, 262, 26], [286, 276, 18], [258, 290, 22], [292, 306, 14], [272, 322, 20]].map(([x, y, w], i) => (
-          <rect key={i} x={x} y={y} width={w} height="1.8" rx="0.9" className="zv-shimmer" style={{ animationDelay: `${i * 0.42}s` }} />
-        ))}
-      </g>
-      <g fill="none" stroke="#fff0d1" strokeLinecap="round" strokeWidth="1.2">
+      {/* Слой воды */}
+      <rect y="270" width="640" height="190" fill="url(#zv-auth-water)" />
+      <path d="M0 271q34-10 68 0t68 0 68 0 68 0 68 0 68 0 68 0 68 0 68 0 68 0 68 0v36H0z" fill="#31566a" opacity="0.48" className="zv-auth-wave zv-auth-wave-far" />
+      <path d="M-80 292q37-13 74 0t74 0 74 0 74 0 74 0 74 0 74 0 74 0 74 0 74 0 74 0 74 0v52H-80z" fill="#15384d" opacity="0.8" className="zv-auth-wave zv-auth-wave-mid" />
+      <path d="M-120 326q32-14 64 0t64 0 64 0 64 0 64 0 64 0 64 0 64 0 64 0 64 0 64 0 64 0v70h-640z" fill="#0b1c2b" className="zv-auth-wave zv-auth-wave-near" />
+
+      {/* Световая дорожка */}
+      <path d="M455 271h92c-8 60-15 116-43 189h-47c-9-75-7-129-2-189z" fill="url(#zv-auth-light-road)" opacity="0.5" />
+      <g className="zv-auth-reflection" fill="#ffe0a0">
         {[
-          [281, 268, 23], [275, 284, 15], [292, 300, 19], [263, 315, 13],
-        ].map(([x, y, w], i) => (
-          <path key={i} d={`M${x} ${y}h${w}`} className="zv-light-ripple" style={{ animationDelay: `${i * 0.8}s` }} />
+          [460, 282, 46], [507, 296, 31], [446, 313, 63], [493, 334, 38], [452, 358, 52],
+          [506, 382, 28], [463, 412, 45], [518, 438, 22],
+        ].map(([x, y, w], i) => <rect key={i} x={x} y={y} width={w} height={2 + (i % 2)} rx="1" style={{ animationDelay: `${i * 0.27}s` }} />)}
+      </g>
+
+      {/* Птицы */}
+      <g className="zv-auth-birds" style={{ animationDuration: home ? "34s" : "27s" }}>
+        {[0, 38, 74].map((dx, i) => (
+          <g key={i} transform={`translate(${232 + dx} ${142 + (i % 2) * 13})`} opacity={0.6 - i * 0.1}>
+            <path d="M-12 1q12-9 24 0" fill="none" stroke="#172133" strokeWidth="2" strokeLinecap="round" className="zv-auth-wing" style={{ animationDelay: `${i * 0.17}s` }} />
+            <path d="M12 1q12-9 24 0" fill="none" stroke="#172133" strokeWidth="2" strokeLinecap="round" className="zv-auth-wing" style={{ animationDelay: `${i * 0.17 + 0.09}s` }} />
+          </g>
         ))}
       </g>
 
-      {/* пузырьки */}
-      <g fill="#bcd8e6">
-        {[[84, 3.2, 0], [126, 2.2, 1.9], [196, 2.8, 3.4], [242, 2, 0.7], [316, 3.6, 2.6], [352, 2.4, 4.4]].map(([x, r, delay], i) => (
-          <circle key={i} cx={x} cy="398" r={r} className="zv-bubble" style={{ animationDelay: `${delay}s`, animationDuration: `${7 + (i % 3)}s` }} opacity="0" />
+      {/* Подводный мир: водоросли, пузырьки и рыба */}
+      <g opacity="0.5" stroke="#4d8d82" strokeWidth="2" fill="none" className="zv-auth-kelp">
+        <path d="M44 460q-8-50 8-91t-4-55M66 460q12-58-2-94t16-64M604 460q-10-62 6-104t-7-60M580 460q8-46-5-83t11-60" />
+      </g>
+      <g fill="#a8d9d3">
+        {[[78, 425, 3], [124, 388, 2], [160, 440, 2.4], [244, 416, 2], [558, 404, 3], [612, 368, 2.4]].map(([x, y, r], i) => (
+          <circle key={i} cx={x} cy={y} r={r} className="zv-auth-bubble" style={{ animationDelay: `${i * 0.62}s`, animationDuration: `${6 + (i % 3)}s` }} />
         ))}
       </g>
-
-      {/* рыба идёт под водой */}
-      <g transform="translate(0 336)">
-        <g className="zv-fish">
-          <g className="zv-fish-inner">
-            <path className="zv-tail" d="M-28 0l-13-9v18z" fill="#5f8f7d" />
-            <path d="M-28 0c10-10 28-11 40-1-12 10-30 9-40 1z" fill="#8dbaa6" />
-            <path d="M-10-4c8-4 18-3 24 2-8 3-18 3-24-2z" fill="#a9d0bd" opacity="0.55" />
-            <circle cx="16" cy="-2.5" r="1.9" fill="#08121b" />
-            <path d="M-2-7q6-7 12-1" fill="none" stroke="#6f9d8a" strokeWidth="1.6" />
+      <g transform="translate(0 386)" opacity="0.92">
+        <g className="zv-auth-fish">
+          <g className="zv-auth-fish-inner">
+            <path d="M-42 0-64-14v28z" fill={palette.fish} />
+            <path d="M-42 0c17-17 48-17 69-1-20 17-49 16-69 1z" fill={palette.fish} />
+            <path d="M-26-7q18-11 35-1" fill="none" stroke="#abd3c8" strokeOpacity="0.5" strokeWidth="3" />
+            <circle cx="20" cy="-4" r="3" fill="#07131d" />
+            <path d="M-4-13q8-13 18-2" fill="none" stroke="#427466" strokeWidth="3" />
           </g>
         </g>
       </g>
 
-      {/* рыба выпрыгивает из воды */}
-      <g transform="translate(326 300)">
-        <circle cx="0" cy="0" r="7" fill="#cfe6f0" opacity="0.35" className="zv-splash" />
-        <g className="zv-jump">
-          <path className="zv-tail" d="M-16 0l-9-6v12z" fill="#6d9f8b" />
-          <path d="M-16 0c7-7 19-8 27-1-8 7-20 7-27 1z" fill="#9cc9b4" />
-          <circle cx="7" cy="-2" r="1.5" fill="#08121b" />
+      {/* Блики у поверхности */}
+      <g fill="none" stroke="#d9eff0" strokeLinecap="round" opacity="0.38" className="zv-auth-surface-glints">
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <path key={i} d={`M${20 + i * 118} ${278 + (i % 2) * 9}h${38 + (i % 3) * 13}`} />
+        ))}
+      </g>
+
+      {/* Лодка рыбака — центральный игровой акцент */}
+      <g transform="translate(326 296)" style={boatStyle}>
+        <g className={`zv-auth-boat-motion ${home ? "zv-auth-boat-return" : "zv-auth-boat-out"}`}>
+          <g className="zv-auth-boat-bob">
+            <ellipse cx="0" cy="36" rx="92" ry="10" fill="#020910" opacity="0.48" />
+            <path d="M-80-2q10 30 78 34 66-4 82-34l-8 27q-21 25-74 27-55-2-71-27z" fill="url(#zv-auth-hull)" stroke="#1c1718" strokeWidth="2" />
+            <path d="M-78-2q29 8 78 8t78-8" fill="none" stroke={palette.trim} strokeWidth="3" />
+            <path d="M-65 11q28 10 65 11t65-11" fill="none" stroke="#9f6b43" strokeOpacity="0.7" strokeWidth="2" />
+            <path d="M-36-5h62l10-31h-47z" fill="url(#zv-auth-cabin)" stroke="#31251e" strokeWidth="2" />
+            <path d="M-18-8h17v-18h-17zM6-8h18v-18H6z" fill="url(#zv-auth-glass)" stroke="#302a26" strokeWidth="2" />
+            <path d="M-42-37h76" stroke="#e1c58b" strokeWidth="3" strokeLinecap="round" />
+            <path d="M-6-38v-91" stroke="#2b2421" strokeWidth="4" strokeLinecap="round" />
+            <path d="M-5-124q22 8 33 0v12q-16 6-33 0z" fill={home ? "#c97855" : "#79b49c"} />
+            {/* рыбак и удилище */}
+            <circle cx="-53" cy="-25" r="8" fill="#10161e" />
+            <path d="M-61-17q9 6 16 21h-19q-3-10 3-21z" fill="#151b23" />
+            <path d="M-47-20-4-78" stroke="#141922" strokeWidth="3" strokeLinecap="round" />
+            <path d="M-4-78q24 75 32 125" fill="none" stroke="#dce5e1" strokeOpacity="0.65" strokeWidth="1" />
+            <circle cx="29" cy="34" r="4" fill={palette.glow} className="zv-auth-float" />
+            {/* бортовой фонарь */}
+            <circle cx="-34" cy="-40" r="22" fill={palette.glow} opacity="0.22" className="zv-auth-lantern" />
+            <circle cx="-34" cy="-40" r="5" fill="#fff0bd" className="zv-auth-lantern" />
+            <path d="M-41-49h14" stroke="#fff4d6" strokeOpacity="0.75" strokeWidth="2" />
+          </g>
         </g>
       </g>
 
-      {/* лодка: лёгкий дрейф в сторону выхода или возвращения */}
-      <g transform={boat}>
-        <g className="zv-boat-drift" style={{ animationDirection: home ? "reverse" : "normal" }}>
-          <g className="zv-boat">
-            <ellipse cx="0" cy="18" rx="52" ry="7" fill="#050a12" opacity="0.45" />
-            <path d="M-46 0q7 17 46 17t46-17z" fill="url(#zv-hull)" />
-            <path d="M-46 0h92" stroke="#6b5a44" strokeWidth="1.6" opacity="0.8" />
-            <path d="M-2 0V-84" stroke="#241f1b" strokeWidth="3.2" strokeLinecap="round" />
-            <path d="M1-80l44 70H1z" fill="url(#zv-sail)" opacity="0.96" />
-            <path d="M-3-72l-34 64h34z" fill="url(#zv-sail-back)" opacity="0.85" />
-            {/* рыбак на корме */}
-            <circle cx="-26" cy="-16" r="6.2" fill="#0b0f16" />
-            <path d="M-26-9q5 7 4 14h-9q-1-7 5-14z" fill="#0b0f16" />
-            <path d="M-21-17l44-30" stroke="#161c27" strokeWidth="1.9" strokeLinecap="round" />
-            <path d="M23-47q10 44 3 78" fill="none" stroke="#cdd9e4" strokeWidth="0.9" opacity="0.45" />
-            <circle cx="26" cy="31" r="2.4" fill="#f0c98a" className="zv-float" />
-            {/* фонарь на мачте */}
-            <circle cx="0" cy="-42" r="13" fill={glow} opacity="0.22" className="zv-lantern" />
-            <circle cx="0" cy="-42" r="3.1" fill="#ffe6b8" className="zv-lantern" />
-          </g>
-        </g>
+      {/* Кильватер лодки и передний слой волн */}
+      <g className={`zv-auth-wake ${home ? "zv-auth-wake-return" : "zv-auth-wake-out"}`} fill="none" stroke="#d7eef0" strokeLinecap="round">
+        <path d="M236 329q-42 10-93 0t-94 7" strokeWidth="3" opacity="0.6" />
+        <path d="M238 337q-52 22-103 11t-85 8" strokeWidth="1.5" opacity="0.42" />
+        <path d="M412 329q48 13 104 3t95 8" strokeWidth="2" opacity="0.34" />
+      </g>
+      <path d="M0 397q36-16 72 0t72 0 72 0 72 0 72 0 72 0 72 0 72 0 72 0 72 0v63H0z" fill="#06121e" opacity="0.82" className="zv-auth-wave zv-auth-wave-front" />
+      <g fill="none" stroke="#6fa8ae" strokeLinecap="round" opacity="0.32">
+        <path d="M20 416h85m28-12h64m64 24h93m42-17h76m30 14h75" />
+        <path d="M56 443h110m46-11h70m52 19h118" />
       </g>
     </svg>
   );

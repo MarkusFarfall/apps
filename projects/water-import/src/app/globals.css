@@ -623,3 +623,204 @@ input {
   }
   .zv-check { stroke-dashoffset: 0; }
 }
+
+/* ───────── новый игровой экран авторизации ─────────
+   SVG остаётся лёгким: двигаются только отдельные группы через transform/opacity,
+   а не сотни SVG-узлов по отдельности. */
+.zv-auth-orb {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: zvAuthOrb 9s ease-in-out infinite;
+}
+@keyframes zvAuthOrb {
+  0%, 100% { transform: translateY(2px) scale(1); }
+  50% { transform: translateY(-4px) scale(1.025); }
+}
+.zv-auth-star {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: zvAuthStar 4.8s ease-in-out infinite;
+}
+@keyframes zvAuthStar {
+  0%, 100% { opacity: 0.18; transform: scale(0.8); }
+  50% { opacity: 0.95; transform: scale(1.15); }
+}
+.zv-auth-cloud {
+  transform-box: fill-box;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.zv-auth-cloud-back { animation: zvAuthCloudBack 42s linear infinite; }
+.zv-auth-cloud-front { animation: zvAuthCloudFront 31s linear infinite; }
+@keyframes zvAuthCloudBack {
+  from { transform: translateX(-20px); }
+  to { transform: translateX(170px); }
+}
+@keyframes zvAuthCloudFront {
+  from { transform: translateX(70px); }
+  to { transform: translateX(-170px); }
+}
+.zv-auth-lighthouse { transform-box: fill-box; transform-origin: center bottom; animation: zvAuthLighthouse 7s ease-in-out infinite; }
+@keyframes zvAuthLighthouse {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1px); }
+}
+.zv-auth-lantern { animation: zvAuthLantern 2.8s ease-in-out infinite; }
+@keyframes zvAuthLantern {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.zv-auth-wave {
+  transform-box: fill-box;
+  animation: zvAuthWave 11s linear infinite;
+}
+.zv-auth-wave-mid { animation-duration: 8s; animation-direction: reverse; }
+.zv-auth-wave-near { animation-duration: 6s; }
+.zv-auth-wave-front { animation-duration: 9s; animation-direction: reverse; }
+@keyframes zvAuthWave {
+  from { transform: translateX(0); }
+  to { transform: translateX(-92px); }
+}
+.zv-auth-reflection rect {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: zvAuthReflection 2.9s ease-in-out infinite;
+}
+@keyframes zvAuthReflection {
+  0%, 100% { opacity: 0.18; transform: scaleX(0.58); }
+  50% { opacity: 0.78; transform: scaleX(1.12); }
+}
+.zv-auth-birds {
+  transform-box: fill-box;
+  animation: zvAuthBirds 30s linear infinite;
+}
+@keyframes zvAuthBirds {
+  from { transform: translateX(-160px) translateY(5px); }
+  50% { transform: translateX(40px) translateY(-7px); }
+  to { transform: translateX(260px) translateY(4px); }
+}
+.zv-auth-wing {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: zvAuthWing 0.9s ease-in-out infinite;
+}
+@keyframes zvAuthWing {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.28); }
+}
+.zv-auth-kelp {
+  transform-box: fill-box;
+  transform-origin: bottom center;
+  animation: zvAuthKelp 5.8s ease-in-out infinite;
+}
+@keyframes zvAuthKelp {
+  0%, 100% { transform: skewX(-1deg); }
+  50% { transform: skewX(2deg); }
+}
+.zv-auth-bubble {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+  animation: zvAuthBubble 7s ease-in infinite;
+}
+@keyframes zvAuthBubble {
+  0% { opacity: 0; transform: translateY(16px) scale(0.7); }
+  16% { opacity: 0.52; }
+  76% { opacity: 0.24; }
+  100% { opacity: 0; transform: translateY(-130px) scale(1.08); }
+}
+.zv-auth-fish {
+  animation: zvAuthFish 21s linear infinite;
+}
+.zv-auth-fish-inner {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: zvAuthFishBob 3.7s ease-in-out infinite;
+}
+@keyframes zvAuthFish {
+  from { transform: translateX(-150px); }
+  to { transform: translateX(790px); }
+}
+@keyframes zvAuthFishBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-9px); }
+}
+.zv-auth-float { animation: zvAuthFloat 3.2s ease-in-out infinite; }
+@keyframes zvAuthFloat {
+  0%, 100% { transform: translateY(0); }
+  45% { transform: translateY(4px); }
+  70% { transform: translateY(-2px); }
+}
+.zv-auth-surface-glints {
+  animation: zvAuthGlints 5s ease-in-out infinite;
+}
+@keyframes zvAuthGlints {
+  0%, 100% { opacity: 0.18; transform: translateX(-12px); }
+  50% { opacity: 0.62; transform: translateX(12px); }
+}
+.zv-auth-boat-motion {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+.zv-auth-boat-out { animation: zvAuthBoatOut 8.5s ease-in-out infinite; }
+.zv-auth-boat-return { animation: zvAuthBoatReturn 8.5s ease-in-out infinite; }
+@keyframes zvAuthBoatOut {
+  0%, 100% { transform: translateX(-9px) rotate(-0.7deg); }
+  50% { transform: translateX(11px) rotate(0.9deg); }
+}
+@keyframes zvAuthBoatReturn {
+  0%, 100% { transform: translateX(10px) rotate(0.9deg); }
+  50% { transform: translateX(-11px) rotate(-0.7deg); }
+}
+.zv-auth-boat-bob {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: zvAuthBoatBob 4.6s ease-in-out infinite;
+}
+@keyframes zvAuthBoatBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+.zv-auth-wake {
+  stroke-dasharray: 32 18;
+  animation-duration: 3.8s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.zv-auth-wake-out { animation-name: zvAuthWakeOut; }
+.zv-auth-wake-return { animation-name: zvAuthWakeReturn; }
+@keyframes zvAuthWakeOut {
+  from { stroke-dashoffset: 0; opacity: 0.18; }
+  50% { opacity: 0.72; }
+  to { stroke-dashoffset: -150; opacity: 0.18; }
+}
+@keyframes zvAuthWakeReturn {
+  from { stroke-dashoffset: -150; opacity: 0.18; }
+  50% { opacity: 0.72; }
+  to { stroke-dashoffset: 0; opacity: 0.18; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zv-auth-orb,
+  .zv-auth-star,
+  .zv-auth-cloud,
+  .zv-auth-lighthouse,
+  .zv-auth-lantern,
+  .zv-auth-wave,
+  .zv-auth-reflection rect,
+  .zv-auth-birds,
+  .zv-auth-wing,
+  .zv-auth-kelp,
+  .zv-auth-bubble,
+  .zv-auth-fish,
+  .zv-auth-fish-inner,
+  .zv-auth-float,
+  .zv-auth-surface-glints,
+  .zv-auth-boat-motion,
+  .zv-auth-boat-bob,
+  .zv-auth-wake {
+    animation: none !important;
+  }
+}

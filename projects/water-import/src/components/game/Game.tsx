@@ -290,15 +290,23 @@ export default function Game() {
     if (!ctx) return;
     let raf = 0;
     let last = performance.now();
+    let lastRender = 0;
+    let clearedWhileAuth = false;
     let W = 0, H = 0;
     sceneRef.current.quality = quality;
     const resize = () => {
-      const dpr = quality >= 2 ? Math.min(2, window.devicePixelRatio || 1) : quality === 1 ? Math.min(1.5, window.devicePixelRatio || 1) : 1;
       W = canvas.clientWidth;
       H = canvas.clientHeight;
-      canvas.width = Math.floor(W * dpr);
-      canvas.height = Math.floor(H * dpr);
+      // Ограничиваем число физических пикселей. На 4K-дисплее DPR=2 даёт
+      // больше восьми миллионов пикселей на каждый кадр — для морской сцены
+      // это заметно дороже, чем небольшой выигрыш в резкости.
+      const requested = quality >= 2 ? Math.min(2, window.devicePixelRatio || 1) : quality === 1 ? Math.min(1.5, window.devicePixelRatio || 1) : 1;
+      const budget = quality >= 2 ? 2_600_000 : quality === 1 ? 1_650_000 : 950_000;
+      const dpr = Math.max(0.75, Math.min(requested, Math.sqrt(budget / Math.max(1, W * H))));
+      canvas.width = Math.max(1, Math.floor(W * dpr));
+      canvas.height = Math.max(1, Math.floor(H * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      lastRender = 0;
     };
     resize();
     window.addEventListener("resize", resize);
@@ -306,16 +314,38 @@ export default function Game() {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       const e = engineRef.current;
-      e.update(dt);
       const a = audioRef.current;
       const scene = sceneRef.current;
+
+      // Пока открыт экран входа, большой canvas с игрой не нужен: его заменяет
+      // лёгкая SVG-сцена авторизации. На титуле оставляем фон, но обновляем его
+      // реже, чтобы не тратить GPU на невидимую подложку.
+      if (boot.state === "auth") {
+        if (!clearedWhileAuth) {
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          clearedWhileAuth = true;
+        }
+        e.sfx.length = 0;
+        raf = requestAnimationFrame(loop);
+        return;
+      }
+      clearedWhileAuth = false;
+      if (!playing && now - lastRender < 1000 / 20) {
+        raf = requestAnimationFrame(loop);
+        return;
+      }
+      lastRender = now;
+      if (playing) e.update(dt);
+
       // Размер canvas может оказаться нулевым (окно свёрнуто, элемент ещё не разложен).
-      // Рисовать в этом случае нечего, но цикл обязан выжить: следующий кадр
-      // планируется в любом случае, иначе игра «замерзает» до перезапуска.
+      // Рисовать в этом случае нечего, но цикл обязан выжить.
       if (W > 0 && H > 0) {
         if (e.s.atPort) portSceneRef.current.render(ctx, e, W, H, dt);
         else scene.render(ctx, e, W, H, dt);
-        if (a.ready) {
+        // Во время заставки музыка и процедурная среда не должны продолжать
+        // генерировать звук за кадром. SFX сбрасываются только в активной игре.
+        if (playing && a.ready) {
           while (e.sfx.length) a.play(e.sfx.shift()!);
           const under = Math.max(0, Math.min(1, (scene.camY - H * 0.05) / (H * 0.35)));
           a.update(e, dt, under);
@@ -327,10 +357,11 @@ export default function Game() {
     };
     raf = requestAnimationFrame(loop);
     return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); };
-  }, [quality]);
+  }, [quality, playing, boot.state]);
 
   useEffect(() => {
     engineRef.current.paused = !playing || panel !== null || letter !== null || authOpen !== null || boot.state === "auth" || engine.s.atPort || !!travelling || !!tripReq;
+    audioRef.current.setActive(playing);
     audioRef.current.setMuffled(playing && (panel !== null || letter !== null || authOpen !== null));
   }, [engine, playing, panel, letter, authOpen, travelling, tripReq, engine.s.atPort, boot.state]);
 
@@ -442,7 +473,8 @@ export default function Game() {
   const found = Object.keys(s.codex).length;
   const rank = [...MILESTONES].reverse().find((m) => found >= m.count)?.title ?? "Новичок";
   const hh = String(Math.floor(engine.hour)).padStart(2, "0");
-  const mm = String(Math.floor(((engine.hour % 1) * 60) / 10) * 10).padStart(2, "0");
+  // Показываем реальные игровые минуты, а не округление к десятиминутным делениям.
+  const mm = String(Math.floor(engine.s.minutes % 60)).padStart(2, "0");
   const w = WEATHER_INFO[s.weather];
   const fc = engine.forecast;
   const busy = engine.phase === "fight" || engine.phase === "bite" || engine.phase === "caught";
