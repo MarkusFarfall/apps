@@ -10,6 +10,9 @@ build/
 .env.*
 !.env.example
 
+# сгенерированное превью сцены входа (npx tsx scripts/render-auth-scene.tsx)
+auth-scene.html
+
 # Vercel
 .vercel
 
