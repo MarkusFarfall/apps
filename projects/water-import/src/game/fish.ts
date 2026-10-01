@@ -97,12 +97,19 @@ export const FISH_TOTAL = FISH.length;
 
 export const FISH_BY_ID: Record<string, FishDef> = Object.fromEntries(FISH.map((f) => [f.id, f]));
 
+/**
+ * Редкость вида.
+ *
+ * `base` — ставка за одну рыбу в рублях: её платят независимо от веса, даже за
+ * мелкую. Без неё бычок на 50 граммов стоил пару рублей, и улов не окупал
+ * приманку. К ставке сверху добавляется вес по цене за килограмм.
+ */
 export const RARITY_INFO = {
-  common: { name: "Обычная", color: "#a9b4ba", weight: 100, bonus: 25 },
-  uncommon: { name: "Необычная", color: "#8dbb98", weight: 38, bonus: 60 },
-  rare: { name: "Редкая", color: "#83acd0", weight: 12, bonus: 150 },
-  epic: { name: "Исключительная", color: "#ad96c8", weight: 3.5, bonus: 400 },
-  legendary: { name: "Легендарная", color: "#d7b46e", weight: 1.2, bonus: 1500 },
+  common: { name: "Обычная", color: "#a9b4ba", weight: 100, bonus: 25, base: 35 },
+  uncommon: { name: "Необычная", color: "#8dbb98", weight: 38, bonus: 60, base: 50 },
+  rare: { name: "Редкая", color: "#83acd0", weight: 12, bonus: 150, base: 70 },
+  epic: { name: "Исключительная", color: "#ad96c8", weight: 3.5, bonus: 400, base: 110 },
+  legendary: { name: "Легендарная", color: "#d7b46e", weight: 1.2, bonus: 1500, base: 200 },
 } as const;
 
 export const VARIANT_INFO = {
