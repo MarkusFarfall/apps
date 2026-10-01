@@ -9,7 +9,7 @@ import { Field, PasswordField } from "./AuthFields";
  * Вход и регистрация. Гостевого режима нет: без аккаунта игра не начинается,
  * поэтому этот экран показывается сразу и закрыть его нельзя.
  */
-export function AuthScreen({ onReady, offline = false }: { onReady: (user: AccountUser, playerId: string, mode: "login" | "register") => void; offline?: boolean }) {
+export function AuthScreen({ onReady, offline = false, onUi }: { onReady: (user: AccountUser, playerId: string, mode: "login" | "register") => void; offline?: boolean; onUi?: () => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -19,6 +19,7 @@ export function AuthScreen({ onReady, offline = false }: { onReady: (user: Accou
 
   const swap = (next: "login" | "register") => {
     if (busy || done || next === mode) return;
+    onUi?.();
     setMode(next);
     setErr(null);
     setF((prev) => ({ ...prev, password: "", password2: "" }));
@@ -26,6 +27,7 @@ export function AuthScreen({ onReady, offline = false }: { onReady: (user: Accou
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    onUi?.();
     setErr(null);
     if (mode === "register") {
       if (f.password.length < 8) return setErr("Пароль — не короче 8 символов");

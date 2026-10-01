@@ -21,6 +21,21 @@ const PROGRESSIONS: Record<string, { root: number; chords: number[][]; dur: numb
 const A2 = 110;
 const hz = (semi: number) => A2 * Math.pow(2, semi / 12);
 
+/**
+ * Целевые уровни шин. Мир намеренно тише событий: при прежних 1.0/1.0/0.6
+ * прибой (peak −11 dB) маскировал заброс (−20 dB) и UI-клики (−50 dB) —
+ * игрок не получал звуковой обратной связи от действий.
+ */
+const BUS = { amb: 0.62, sfx: 1.5, ui: 1.4, music: 0.5 };
+/** Сколько коротких голосов может звучать одновременно (защита от «шторма узлов»). */
+const VOICES = { mobile: 28, full: 56 };
+/** Сколько секунд шума в буферах: было 3 с × 3 буфера = ~400 тыс. отсчётов за один тап. */
+const NOISE_SECONDS = 2;
+/** События, под которые фон коротко прибирается, чтобы они читались поверх прибоя. */
+const DUCK: ReadonlySet<Sfx> = new Set<Sfx>([
+  "cast", "splash", "bite", "hook", "snap", "catch", "newSpecies", "legend", "jump", "bottom",
+]);
+
 export class GameAudio {
   private ctx: BaseAudioContext | null = null;
   private muffle!: BiquadFilterNode;
@@ -33,6 +48,7 @@ export class GameAudio {
   private musicFilter!: BiquadFilterNode;
   private uiBus!: GainNode;
   private verb!: ConvolverNode;
+  private verbOut!: GainNode;
   private verbIn!: GainNode;
   private white!: AudioBuffer;
   private pink!: AudioBuffer;
@@ -75,6 +91,16 @@ export class GameAudio {
   private pianoQueue: number[] = [];
   private updateAcc = 0;
   private active = true;
+  /** Клики интерфейса звучат и вне игры: раньше меню и экран входа были немыми. */
+  private uiActive = true;
+  /** Тяжёлая часть графа (цветной шум, реверб, среда) собрана. */
+  private worldReady = false;
+  private worldStep = 0;
+  private worldQueued = false;
+  /** Моменты окончания звучащих голосов — бюджет вместо подсчёта onended. */
+  private voiceEnds: number[] = [];
+  /** 0/1 — телефон и слабое железо, 2 — полноценно (плотность событий, длина реверба). */
+  private quality = 2;
 
   enabled = true;
   music = true;
@@ -108,11 +134,18 @@ export class GameAudio {
     else {
       const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AC) return;
+      // «playback» просит большой выходной буфер. «interactive» даёт ~10 мс, и на
+      // телефоне при занятом рендером главном потоке это регулярно уходит в
+      // дропауты — звук заикается. Задержка в 100 мс для рыбалки не важна.
       try {
-        ctx = new AC({ latencyHint: "interactive" });
+        ctx = new AC({ latencyHint: "playback" });
       } catch {
-        // Старые реализации WebKit могут не принимать параметры конструктора.
-        try { ctx = new AC(); } catch { return; }
+        try {
+          ctx = new AC({ latencyHint: "interactive" });
+        } catch {
+          // Старые реализации WebKit могут не принимать параметры конструктора.
+          try { ctx = new AC(); } catch { return; }
+        }
       }
     }
     this.ctx = ctx;
@@ -139,22 +172,24 @@ export class GameAudio {
     this.master.connect(this.muffle).connect(comp).connect(this.limiter).connect(ctx.destination);
 
     this.verb = ctx.createConvolver();
-    this.verb.buffer = this.impulse(3.2, 2.4);
     this.verbIn = ctx.createGain();
     this.verbIn.gain.value = 1;
-    const verbOut = ctx.createGain();
-    verbOut.gain.value = 0.55;
-    this.verbIn.connect(this.verb).connect(verbOut).connect(this.master);
+    this.verbOut = ctx.createGain();
+    this.verbOut.gain.value = 0.55;
+    // Цепочка реверба собрана сразу, а импульс (сотни тысяч отсчётов) считается
+    // позже в buildReverb(): пустой буфер convolver даёт тишину только на
+    // send-пути, зато первый тап не блокирует главный поток.
+    this.verbIn.connect(this.verb).connect(this.verbOut).connect(this.master);
 
     this.ambFilter = ctx.createBiquadFilter();
     this.ambFilter.type = "lowpass";
     this.ambFilter.frequency.value = 18000;
     this.ambBus = ctx.createGain();
-    this.ambBus.gain.value = this.enabled ? 1 : 0;
+    this.ambBus.gain.value = this.enabled ? BUS.amb : 0;
     this.ambBus.connect(this.ambFilter).connect(this.master);
 
     this.sfxBus = ctx.createGain();
-    this.sfxBus.gain.value = this.enabled ? 1 : 0;
+    this.sfxBus.gain.value = this.enabled ? BUS.sfx : 0;
     this.sfxBus.connect(this.master);
     const sfxSend = ctx.createGain();
     sfxSend.gain.value = 0.18;
@@ -164,7 +199,7 @@ export class GameAudio {
     this.musicFilter.type = "lowpass";
     this.musicFilter.frequency.value = 9000;
     this.musicBus = ctx.createGain();
-    this.musicBus.gain.value = this.music && this.active ? 0.55 : 0;
+    this.musicBus.gain.value = this.music && this.enabled && this.active ? BUS.music : 0;
     this.musicBus.connect(this.musicFilter);
     this.musicFilter.connect(this.master);
     const mSend = ctx.createGain();
@@ -172,11 +207,12 @@ export class GameAudio {
     this.musicFilter.connect(mSend).connect(this.verbIn);
 
     this.uiBus = ctx.createGain();
-    this.uiBus.gain.value = this.enabled ? 0.6 : 0;
+    this.uiBus.gain.value = this.enabled && this.uiActive ? BUS.ui : 0;
     this.uiBus.connect(this.master);
 
-    this.makeNoise();
-    this.buildAmbience();
+    this.makeWhite();
+    // Остальное — по шагам и вне жеста: см. scheduleWorld().
+    this.scheduleWorld();
     // Повторно запрашиваем запуск после сборки графа: браузер мог принять
     // первый resume до подключения источников, но оставить контекст на паузе.
     this.resumeContext();
@@ -201,24 +237,78 @@ export class GameAudio {
     return buf;
   }
 
-  private makeNoise() {
+  /** Секунда белого шума — нужна сразу: из неё состоят клики интерфейса. */
+  private makeWhite() {
     const ctx = this.ctx!;
-    const len = ctx.sampleRate * 3;
+    const len = Math.floor(ctx.sampleRate * NOISE_SECONDS);
     this.white = ctx.createBuffer(1, len, ctx.sampleRate);
+    const w = this.white.getChannelData(0);
+    for (let i = 0; i < len; i++) w[i] = Math.random() * 2 - 1;
+  }
+
+  private makePink() {
+    const ctx = this.ctx!;
+    const len = Math.floor(ctx.sampleRate * NOISE_SECONDS);
     this.pink = ctx.createBuffer(1, len, ctx.sampleRate);
-    this.brown = ctx.createBuffer(1, len, ctx.sampleRate);
-    const w = this.white.getChannelData(0), p = this.pink.getChannelData(0), b = this.brown.getChannelData(0);
-    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, last = 0;
+    const p = this.pink.getChannelData(0);
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
     for (let i = 0; i < len; i++) {
       const x = Math.random() * 2 - 1;
-      w[i] = x;
       b0 = 0.99886 * b0 + x * 0.0555179; b1 = 0.99332 * b1 + x * 0.0750759; b2 = 0.969 * b2 + x * 0.153852;
       b3 = 0.8665 * b3 + x * 0.3104856; b4 = 0.55 * b4 + x * 0.5329522; b5 = -0.7616 * b5 - x * 0.016898;
       p[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + x * 0.5362) * 0.11;
       b6 = x * 0.115926;
+    }
+  }
+
+  private makeBrown() {
+    const ctx = this.ctx!;
+    const len = Math.floor(ctx.sampleRate * NOISE_SECONDS);
+    this.brown = ctx.createBuffer(1, len, ctx.sampleRate);
+    const b = this.brown.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < len; i++) {
+      const x = Math.random() * 2 - 1;
       last = (last + 0.02 * x) / 1.02;
       b[i] = last * 3.5;
     }
+  }
+
+  private buildReverb() {
+    if (!this.ctx) return;
+    this.verb.buffer = this.impulse(this.quality >= 2 ? 2.6 : 1.4, 2.4);
+  }
+
+  /**
+   * Сборка мира по шагам и вне жеста пользователя. Синхронный init() стоил
+   * ~220 мс блокировки главного потока на телефоне (4× троттлинг, 2 ядра):
+   * первый тап заметно подтормаживал, а звук стартовал с задержкой.
+   */
+  private scheduleWorld() {
+    if (!this.ctx || this.worldReady || this.worldQueued) return;
+    this.worldQueued = true;
+    const run = () => {
+      if (!this.ctx) return;
+      try {
+        if (this.worldStep === 0) this.makePink();
+        else if (this.worldStep === 1) this.makeBrown();
+        else if (this.worldStep === 2) this.buildReverb();
+        else this.buildAmbience();
+      } catch (err) {
+        // Звук не имеет права ронять игру: шаг пропускаем и идём дальше.
+        console.warn("[audio] шаг сборки пропущен", err);
+      }
+      this.worldStep++;
+      if (this.worldStep > 3) { this.worldReady = true; this.worldQueued = false; return; }
+      idle(run);
+    };
+    const idle = (fn: () => void) => {
+      if (typeof window === "undefined") { fn(); return; }
+      const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }).requestIdleCallback;
+      if (typeof ric === "function") ric(fn, { timeout: 150 });
+      else setTimeout(fn, 0);
+    };
+    idle(run);
   }
 
   private loopSrc(buf: AudioBuffer) {
@@ -251,6 +341,7 @@ export class GameAudio {
 
   private buildAmbience() {
     const ctx = this.ctx!;
+    if (!this.pink || !this.brown) return;
     // низкий гул прибоя
     this.surfLow = this.gain();
     this.loopSrc(this.brown).connect(this.filter("lowpass", 320)).connect(this.surfLow).connect(this.ambBus);
@@ -326,24 +417,56 @@ export class GameAudio {
     this.enabled = on;
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    this.ambBus.gain.setTargetAtTime(on && this.active ? 1 : 0, t, 0.15);
-    this.sfxBus.gain.setTargetAtTime(on && this.active ? 1 : 0, t, 0.15);
-    this.uiBus.gain.setTargetAtTime(on && this.active ? 0.6 : 0, t, 0.15);
+    this.ambBus.gain.setTargetAtTime(on && this.active ? BUS.amb : 0, t, 0.15);
+    this.sfxBus.gain.setTargetAtTime(on && this.active ? BUS.sfx : 0, t, 0.15);
+    this.uiBus.gain.setTargetAtTime(on && this.uiActive ? BUS.ui : 0, t, 0.15);
+    // «Звук выключен» обязан выключать всё: раньше музыка и фанфары (catch,
+    // levelUp, quest, newSpecies, legend) продолжали играть при sound=off.
+    this.musicBus.gain.setTargetAtTime(on && this.music && this.active ? BUS.music : 0, t, 0.25);
+  }
+
+  /** Клики интерфейса: отдельный гейт, чтобы меню и экран входа не были немыми. */
+  setUiActive(on: boolean) {
+    this.uiActive = on;
+    if (this.ctx) this.uiBus.gain.setTargetAtTime(on && this.enabled ? BUS.ui : 0, this.ctx.currentTime, 0.12);
+  }
+
+  /** 0/1 — телефон, 2 — полноценный режим. */
+  setQuality(q: number) {
+    const next = Math.max(0, Math.min(2, Math.round(Number.isFinite(q) ? q : 2)));
+    if (next === this.quality) return;
+    const was = this.quality;
+    this.quality = next;
+    // До init() узлов ещё нет (setQuality зовут из mount-эффекта): verb?.buffer.
+    if (this.verb?.buffer && (was >= 2) !== (next >= 2)) this.buildReverb();
+  }
+
+  /** Срез состояния — для поддержки и автотестов. */
+  debug() {
+    const c = this.ctx as AudioContext | null;
+    return {
+      ready: !!this.ctx, state: c?.state ?? "none", worldReady: this.worldReady,
+      active: this.active, uiActive: this.uiActive, enabled: this.enabled,
+      music: this.music, volume: this.volume, quality: this.quality, hidden: this.hidden,
+      voices: this.voiceEnds.length, baseLatency: c?.baseLatency ?? null, sampleRate: c?.sampleRate ?? null,
+    };
   }
   setMusic(on: boolean) {
     this.music = on;
-    if (this.ctx) this.musicBus.gain.setTargetAtTime(on && this.active ? 0.55 : 0, this.ctx.currentTime, 0.5);
+    if (this.ctx) this.musicBus.gain.setTargetAtTime(on && this.enabled && this.active ? BUS.music : 0, this.ctx.currentTime, 0.5);
   }
   /** Вне игры процедурная среда молчит, но сам AudioContext не пересоздаётся. */
   setActive(on: boolean) {
     this.active = on;
     this.updateAcc = 0;
     if (!this.ctx) return;
+    if (on) this.scheduleWorld();
     const t = this.ctx.currentTime;
-    this.ambBus.gain.setTargetAtTime(on && this.enabled ? 1 : 0, t, 0.18);
-    this.sfxBus.gain.setTargetAtTime(on && this.enabled ? 1 : 0, t, 0.18);
-    this.musicBus.gain.setTargetAtTime(on && this.music ? 0.55 : 0, t, 0.35);
-    this.uiBus.gain.setTargetAtTime(on && this.enabled ? 0.6 : 0, t, 0.18);
+    this.ambBus.gain.setTargetAtTime(on && this.enabled ? BUS.amb : 0, t, 0.18);
+    this.sfxBus.gain.setTargetAtTime(on && this.enabled ? BUS.sfx : 0, t, 0.18);
+    this.musicBus.gain.setTargetAtTime(on && this.music && this.enabled ? BUS.music : 0, t, 0.35);
+    // Шина интерфейса не зависит от active: клики нужны и в меню.
+    this.uiBus.gain.setTargetAtTime(this.uiActive && this.enabled ? BUS.ui : 0, t, 0.18);
   }
   /** Приглушение мира, пока открыто окно интерфейса */
   setMuffled(on: boolean) {
@@ -375,8 +498,36 @@ export class GameAudio {
   }
 
   // ─────────── примитивы звука ───────────
-  private burst(o: { buf?: AudioBuffer; type: BiquadFilterType; f: number; f2?: number; q?: number; g: number; a?: number; d: number; at?: number; pan?: number; bus?: AudioNode }) {
+  /**
+   * Бюджет голосов. Шторм и вываживание рождали до 70 коротких узлов в секунду
+   * (капля дождя = осциллятор + gain + panner), главный поток не успевал, и
+   * звук начинал заикаться. Счётчик самовосстанавливающийся: голоса «истекают»
+   * по времени, поэтому утечка onended не может заглушить игру навсегда.
+   */
+  private takeVoice(span: number) {
+    const ctx = this.ctx;
+    if (!ctx) return false;
+    const now = ctx.currentTime;
+    if (this.voiceEnds.length) this.voiceEnds = this.voiceEnds.filter((t) => t > now);
+    if (this.voiceEnds.length >= (this.quality >= 2 ? VOICES.full : VOICES.mobile)) return false;
+    this.voiceEnds.push(now + Math.max(0.02, Number.isFinite(span) ? span : 0.05));
+    return true;
+  }
+
+  /** Короткий дакинг фона: событие читается поверх прибоя без роста общего уровня. */
+  private duckAmb(to = 0.55, hold = 0.12, release = 0.3) {
+    if (!this.ctx || !this.worldReady) return;
+    const t = this.ctx.currentTime;
+    const base = this.enabled && this.active ? BUS.amb : 0;
+    if (base <= 0) return;
+    this.ambBus.gain.cancelScheduledValues(t);
+    this.ambBus.gain.setValueAtTime(Math.max(0.0001, this.ambBus.gain.value), t);
+    this.ambBus.gain.setTargetAtTime(base * to, t, 0.02);
+    this.ambBus.gain.setTargetAtTime(base, t + hold, release);
+  }
+  private burst(o: { buf?: AudioBuffer; type: BiquadFilterType; f: number; f2?: number; q?: number; g: number; a?: number; d: number; at?: number; pan?: number; bus?: AudioNode; critical?: boolean }) {
     const ctx = this.ctx!;
+    if (!o.critical && !this.takeVoice((o.at ?? 0) + o.d + 0.05)) return;
     const t0 = ctx.currentTime + (o.at ?? 0);
     const s = ctx.createBufferSource();
     s.buffer = o.buf ?? this.white;
@@ -393,8 +544,9 @@ export class GameAudio {
     s.stop(t0 + o.d + 0.05);
   }
 
-  private osc(o: { type?: OscillatorType; f: number; f2?: number; g: number; a?: number; d: number; at?: number; pan?: number; bus?: AudioNode; curve?: "exp" | "lin" }) {
+  private osc(o: { type?: OscillatorType; f: number; f2?: number; g: number; a?: number; d: number; at?: number; pan?: number; bus?: AudioNode; curve?: "exp" | "lin"; critical?: boolean }) {
     const ctx = this.ctx!;
+    if (!o.critical && !this.takeVoice((o.at ?? 0) + o.d + 0.05)) return;
     const t0 = ctx.currentTime + (o.at ?? 0);
     const os = ctx.createOscillator();
     os.type = o.type ?? "sine";
@@ -465,24 +617,31 @@ export class GameAudio {
   }
 
   ui(kind: UiSound) {
-    if (!this.ctx || !this.enabled || !this.active) return;
+    // active больше не блокирует интерфейс: клики работают и в меню.
+    if (!this.ctx || !this.enabled || !this.uiActive) return;
     switch (kind) {
-      case "click": this.burst({ type: "bandpass", f: 3200, q: 2, g: 0.08, d: 0.025, bus: this.uiBus }); break;
-      case "open": this.burst({ buf: this.pink, type: "bandpass", f: 500, f2: 1400, q: 0.8, g: 0.07, a: 0.05, d: 0.22, bus: this.uiBus }); break;
-      case "close": this.burst({ buf: this.pink, type: "bandpass", f: 1400, f2: 500, q: 0.8, g: 0.06, a: 0.02, d: 0.18, bus: this.uiBus }); break;
+      case "click":
+        // Белый шум через узкий bandpass (Q=2) терял ~20 дБ и давал −50 dBFS —
+        // клик был не слышно. Тональный «ток» + короткий щелчок сверху.
+        this.osc({ type: "triangle", f: 2100, f2: 1450, g: 0.16, a: 0.002, d: 0.05, bus: this.uiBus, critical: true });
+        this.burst({ type: "highpass", f: 4200, g: 0.09, a: 0.001, d: 0.022, bus: this.uiBus, critical: true });
+        break;
+      case "open": this.burst({ buf: this.pink, type: "bandpass", f: 500, f2: 1400, q: 0.8, g: 0.16, a: 0.05, d: 0.22, bus: this.uiBus, critical: true }); break;
+      case "close": this.burst({ buf: this.pink, type: "bandpass", f: 1400, f2: 500, q: 0.8, g: 0.14, a: 0.02, d: 0.18, bus: this.uiBus, critical: true }); break;
       case "paper":
-        for (let i = 0; i < 5; i++) this.burst({ type: "bandpass", f: 2500 + Math.random() * 2500, q: 1.5, g: 0.05, a: 0.01, d: 0.06 + Math.random() * 0.06, at: i * 0.05 + Math.random() * 0.03, bus: this.uiBus });
+        for (let i = 0; i < 5; i++) this.burst({ type: "bandpass", f: 2500 + Math.random() * 2500, q: 1.5, g: 0.11, a: 0.01, d: 0.06 + Math.random() * 0.06, at: i * 0.05 + Math.random() * 0.03, bus: this.uiBus, critical: true });
         break;
       case "confirm":
-        this.osc({ f: 180, f2: 120, g: 0.12, d: 0.18, bus: this.uiBus });
-        this.burst({ type: "bandpass", f: 2400, q: 2, g: 0.05, d: 0.03, bus: this.uiBus });
+        this.osc({ f: 180, f2: 120, g: 0.2, d: 0.18, bus: this.uiBus, critical: true });
+        this.burst({ type: "bandpass", f: 2400, q: 2, g: 0.1, d: 0.03, bus: this.uiBus, critical: true });
         break;
     }
   }
 
   play(s: Sfx) {
-    if (!this.ctx || !this.active) return;
-    if (!this.enabled && !["catch", "newSpecies", "legend", "levelUp", "quest"].includes(s)) return;
+    // Честный mute: «звук выключен» глушит всё, включая фанфары.
+    if (!this.ctx || !this.active || !this.enabled) return;
+    if (DUCK.has(s)) this.duckAmb();
     switch (s) {
       case "cast":
         this.burst({ buf: this.pink, type: "bandpass", f: 350, f2: 2600, q: 1.4, g: 0.22, a: 0.08, d: 0.38 });
@@ -670,20 +829,26 @@ export class GameAudio {
 
   // ─────────── кадр ───────────
   update(e: Engine, dt: number, under: number) {
-    if (!this.ctx || !this.active) return;
-    // Параметры ambience не требуют 60 обновлений в секунду. Ограничение
-    // управляющего цикла до 30 Гц снижает число AudioParam-вызовов и частоту
-    // рождения коротких rain/reel-узлов, не меняя само звучание.
+    if (!this.ctx || !this.active || !this.worldReady) return;
+    // Параметры ambience не требуют 60 обновлений в секунду. На телефоне держим
+    // 20 Гц вместо 30: меньше AudioParam-вызовов и меньше коротких узлов.
     this.updateAcc += dt;
-    if (this.updateAcc < 1 / 30) return;
+    if (this.updateAcc < (this.quality >= 2 ? 1 / 30 : 1 / 20)) return;
     dt = this.updateAcc;
     this.updateAcc = 0;
     const ctx = this.ctx;
     const now = ctx.currentTime;
-    const w = WEATHER_INFO[e.s.weather];
+    // Сохранение нормализуется в migrateSave(), но звук не имеет права ронять
+    // кадр: любое неизвестное или нечисловое значение заменяется рабочим.
+    const w = WEATHER_INFO[e.s.weather] ?? WEATHER_INFO.clear;
     const port = e.s.atPort;
-    const calmEv = e.activeEvents.some((a) => a.id === "calm") ? 0.3 : 1;
-    const waveAmp = w.wave * e.loc.waveMult * (e.spot.swell ?? 1) * calmEv;
+    const calmEv = e.activeEvents?.some((a) => a.id === "calm") ? 0.3 : 1;
+    const waveMult = Number.isFinite(e.loc?.waveMult) ? e.loc.waveMult : 1;
+    const swellRaw = e.spot?.swell;
+    const swell = typeof swellRaw === "number" && Number.isFinite(swellRaw) ? swellRaw : 1;
+    const tier = Number.isFinite(e.boat?.tier) ? e.boat.tier : 0;
+    const windBase = Number.isFinite(e.s.wind) ? e.s.wind : 0;
+    const waveAmp = w.wave * waveMult * swell * calmEv;
 
     // волны: цикл набегания
     this.waveT += dt;
@@ -696,12 +861,12 @@ export class GameAudio {
     const base = port ? 0.25 : 1;
     this.tgt(this.surfLow.gain, base * (0.08 + waveAmp * 0.08) * (0.6 + env * 0.5), now, 0.25, "surfLow#1");
     this.tgt(this.surfWashL.gain, base * (0.03 + waveAmp * 0.07) * env, now, 0.15, "surfWashL#2");
-    this.surfWashR.gain.setTargetAtTime(base * (0.03 + waveAmp * 0.07) * Math.max(0, Math.sin((ph + 0.3) * Math.PI)) * 0.9, now, 0.15);
+    this.tgt(this.surfWashR.gain, base * (0.03 + waveAmp * 0.07) * Math.max(0, Math.sin((ph + 0.3) * Math.PI)) * 0.9, now, 0.15, "surfWashR#2b");
     this.tgt(this.washFilter.frequency, 700 + env * 900, now, 0.2, "washFilter#3");
 
     // ветер с порывами
     const gust = 0.55 + 0.45 * Math.sin(now * 0.37) * Math.sin(now * 0.13 + 1.3);
-    const wind = e.s.wind + (e.s.weather === "storm" ? 0.35 : 0);
+    const wind = windBase + (e.s.weather === "storm" ? 0.35 : 0);
     this.tgt(this.windG.gain, port ? 0.01 : wind * 0.09 * gust, now, 0.4, "windG#4");
     this.tgt(this.windF.frequency, 380 + gust * 700 * (0.5 + wind), now, 0.4, "windF#5");
     this.tgt(this.whistleG.gain, port ? 0 : Math.max(0, wind - 0.5) * 0.018 * gust, now, 0.6, "whistleG#6");
@@ -712,11 +877,15 @@ export class GameAudio {
     this.tgt(this.rainHi.gain, port ? rain * 0.01 : rain * 0.06, now, 1, "rainHi#8");
     this.tgt(this.rainLo.gain, port ? rain * 0.03 : rain * 0.07, now, 1, "rainLo#9");
     if (rain > 0.3 && this.enabled && !port) {
-      this.dropAcc += dt * rain * 16;
-      while (this.dropAcc > 1) {
+      // Капля — три узла. На телефоне плотность вдвое ниже и не больше трёх
+      // капель за тик: раньше шторм давал ~28 узлов/с и грузил главный поток.
+      this.dropAcc += dt * rain * (this.quality >= 2 ? 16 : 7);
+      let drops = 0;
+      while (this.dropAcc > 1 && drops < 3) {
         this.dropAcc -= 1;
+        drops++;
         const f = 2500 + Math.random() * 4500;
-        this.osc({ f, f2: f * 0.7, g: 0.012 + Math.random() * 0.012, a: 0.001, d: 0.02, at: Math.random() * 0.05, pan: (Math.random() - 0.5) * 1.6, bus: this.ambBus });
+        this.osc({ f, f2: f * 0.7, g: 0.012 + Math.random() * 0.012, a: 0.001, d: 0.02, at: Math.random() * 0.05, pan: this.quality >= 2 ? (Math.random() - 0.5) * 1.6 : undefined, bus: this.ambBus });
       }
     }
 
@@ -744,7 +913,7 @@ export class GameAudio {
       this.creakT -= dt;
       if (this.creakT <= 0) {
         this.creakT = 4 + Math.random() * 9 / (0.5 + waveAmp);
-        if (e.boat.tier <= 2) {
+        if (tier <= 2) {
           const f = 70 + Math.random() * 60;
           const t0 = now;
           const o = ctx.createOscillator();
@@ -762,14 +931,13 @@ export class GameAudio {
         }
       }
     }
-    const tier = e.boat.tier;
     this.tgt(this.engineG.gain, !port && tier >= 2 && !e.paused ? 0.02 + (tier - 2) * 0.012 : 0, now, 0.8, "engineG#13");
     this.tgt(this.engineO.frequency, tier >= 4 ? 30 : 36, now, 1, "engineO#14");
 
     // чайки
     this.gullT -= dt;
     if (this.gullT <= 0) {
-      const gullsEv = e.activeEvents.some((a) => a.id === "gulls" || a.id === "shoal");
+      const gullsEv = e.activeEvents?.some((a) => a.id === "gulls" || a.id === "shoal") ?? false;
       this.gullT = gullsEv ? 3 + Math.random() * 5 : 14 + Math.random() * 24;
       if (this.enabled && !port && !e.isNight && e.s.weather !== "storm" && under < 0.5 && (["bay", "cape", "reef"].includes(e.s.location) || gullsEv)) this.seagull((Math.random() - 0.3) * 1.4);
     }
@@ -782,12 +950,16 @@ export class GameAudio {
       const outRate = dLine > 0 ? dLine / Math.max(dt, 0.001) : 0;
       const inRate = dLine < 0 ? -dLine / Math.max(dt, 0.001) : 0;
       if (this.enabled) {
-        const clicksPerSec = outRate > 0.05 ? Math.min(70, 18 + outRate * 14) : e.reeling ? Math.min(28, 8 + inRate * 4) : 0;
+        // Фрикцион: до 70 щелчков/с × 3 узла — самый дорогой путь в игре.
+        const clickCap = this.quality >= 2 ? 48 : 24;
+        const clicksPerSec = outRate > 0.05 ? Math.min(clickCap, 18 + outRate * 14) : e.reeling ? Math.min(20, 8 + inRate * 4) : 0;
         this.clickAcc += dt * clicksPerSec;
-        while (this.clickAcc > 1) {
+        let clicks = 0;
+        while (this.clickAcc > 1 && clicks < 3) {
           this.clickAcc -= 1;
+          clicks++;
           const drag = outRate > 0.05;
-          this.burst({ type: "bandpass", f: drag ? 3600 + Math.random() * 600 : 2300 + Math.random() * 300, q: drag ? 6 : 4, g: drag ? 0.06 : 0.035, a: 0.0008, d: drag ? 0.01 : 0.014, at: Math.random() * 0.01, pan: 0.15 });
+          this.burst({ type: "bandpass", f: drag ? 3600 + Math.random() * 600 : 2300 + Math.random() * 300, q: drag ? 6 : 4, g: drag ? 0.09 : 0.05, a: 0.0008, d: drag ? 0.01 : 0.014, at: Math.random() * 0.01, pan: this.quality >= 2 ? 0.15 : undefined });
         }
       }
       const t = Math.min(1.2, h.tension);
@@ -804,10 +976,12 @@ export class GameAudio {
       const sinking = e.phase === "sinking" && !e.paused;
       this.tgt(this.whirG.gain, this.enabled && sinking ? 0.006 : 0, now, 0.05, "whirG#23");
       if (sinking && this.enabled) {
-        this.clickAcc += dt * 16;
-        while (this.clickAcc > 1) {
+        this.clickAcc += dt * (this.quality >= 2 ? 16 : 8);
+        let sink = 0;
+        while (this.clickAcc > 1 && sink < 2) {
           this.clickAcc -= 1;
-          this.burst({ type: "bandpass", f: 3000, q: 5, g: 0.02, d: 0.01 });
+          sink++;
+          this.burst({ type: "bandpass", f: 3000, q: 5, g: 0.03, d: 0.01 });
         }
       }
     }
@@ -820,7 +994,7 @@ export class GameAudio {
       this.chordT = Math.min(this.chordT, 2);
     }
     const duck = e.phase === "fight" ? 0.35 : port ? 1.15 : 1;
-    this.tgt(this.musicBus.gain, this.music ? 0.55 * duck : 0, now, 1.2, "musicBus#24");
+    this.tgt(this.musicBus.gain, this.music && this.enabled ? BUS.music * duck : 0, now, 1.2, "musicBus#24");
     this.chordT -= dt;
     if (this.chordT <= 0) {
       this.chordT = this.music ? this.playChord(e) : 4;

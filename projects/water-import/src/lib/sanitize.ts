@@ -1,4 +1,6 @@
 import { FISH_BY_ID } from "@/game/fish";
+import { BOATS, LOC_BY_ID, SPOT_BY_ID, WEATHER_INFO, spotsOf } from "@/game/world";
+import type { LocId, WeatherId } from "@/game/types";
 
 /**
  * Приведение клиентского сохранения к разумному виду.
@@ -50,6 +52,20 @@ export function sanitizeSave(data: Record<string, unknown>): SanitizedSave {
 
   put("money", MAX.money);
   put("xp", MAX.xp);
+
+  // ── мир: неизвестные идентификаторы не должны уезжать в базу ──
+  // Клиент нормализует их в migrateSave(), но защита на сервере дешевле, чем
+  // разбор «пропал звук»: движок звука читает location/weather/boat каждый кадр.
+  if (out.location !== undefined && !LOC_BY_ID[out.location as LocId]) { out.location = "bay"; clamped.push("location"); }
+  if (out.weather !== undefined && !WEATHER_INFO[out.weather as WeatherId]) { out.weather = "clear"; clamped.push("weather"); }
+  if (out.weatherQueued !== undefined && !WEATHER_INFO[out.weatherQueued as WeatherId]) { out.weatherQueued = "cloudy"; clamped.push("weatherQueued"); }
+  if (out.boat !== undefined && (!Number.isInteger(out.boat) || !BOATS[out.boat as number])) { out.boat = 0; clamped.push("boat"); }
+  const spotLoc = (LOC_BY_ID[out.location as LocId] ? out.location : "bay") as LocId;
+  if (out.spot !== undefined && (!SPOT_BY_ID[out.spot as string] || SPOT_BY_ID[out.spot as string].loc !== spotLoc)) {
+    out.spot = spotsOf(spotLoc)[0].id;
+    clamped.push("spot");
+  }
+  if (out.wind !== undefined && (typeof out.wind !== "number" || !Number.isFinite(out.wind))) { out.wind = 0.3; clamped.push("wind"); }
 
   // ── кодекс: только существующие виды, вес не выше максимума вида ──
   const codexRaw = data.codex && typeof data.codex === "object" && !Array.isArray(data.codex) ? (data.codex as Record<string, unknown>) : {};
