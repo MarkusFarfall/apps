@@ -16,9 +16,10 @@ const LEN_K: Record<string, number> = { fusiform: 0.011, deep: 0.024, flat: 0.02
 export const fishLength = (f: FishDef, w: number) => Math.cbrt((w * 1000) / (LEN_K[f.shape] ?? 0.011));
 const fmtLen = (cm: number) => (cm >= 100 ? `${(cm / 100).toFixed(2)} м` : `${Math.round(cm)} см`);
 
-export function Modal({ label, title, onClose, children, tabs, right, wide = true }: { label?: string; title: string; onClose: () => void; children: ReactNode; tabs?: ReactNode; right?: ReactNode; wide?: boolean }) {
+/** `above` поднимает окно выше титульной заставки (z-50) — нужно панелям, доступным до начала игры. */
+export function Modal({ label, title, onClose, children, tabs, right, wide = true, above = false }: { label?: string; title: string; onClose: () => void; children: ReactNode; tabs?: ReactNode; right?: ReactNode; wide?: boolean; above?: boolean }) {
   return (
-    <div className="fade-in absolute inset-0 z-40 flex items-stretch justify-center bg-[#02050a]/72 backdrop-blur-[3px] sm:items-center sm:p-3" onPointerDown={(e) => e.stopPropagation()}>
+    <div className={`fade-in absolute inset-0 ${above ? "z-[60]" : "z-40"} flex items-stretch justify-center bg-[#02050a]/72 backdrop-blur-[3px] sm:items-center sm:p-3`} onPointerDown={(e) => e.stopPropagation()}>
       <div className={`sheet reveal safe-pad flex h-full max-h-[100dvh] w-full flex-col overflow-hidden !rounded-none sm:h-auto sm:max-h-[94vh] sm:!rounded-[3px] ${wide ? "max-w-[1180px]" : "max-w-3xl"}`}>
         <div className="flex shrink-0 items-end justify-between gap-4 px-4 pt-4 sm:px-7 sm:pt-6">
           <div>

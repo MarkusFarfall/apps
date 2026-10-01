@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { players, saves } from "@/db/schema";
 import { levelFromXp } from "@/game/progress";
+import { MIN_PER_DAY } from "@/game/world";
 import { checkPlayerAccess, cleanName, rateLimit } from "@/lib/auth";
 import { body, dbError, fail, json, sameOrigin } from "@/lib/http";
 import { sanitizeSave } from "@/lib/sanitize";
@@ -34,6 +35,7 @@ export async function PUT(req: Request) {
   if (JSON.stringify(data).length > 500_000) return fail("too large", 413);
 
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0);
+  const str = (v: unknown, max: number) => (typeof v === "string" && v.length > 0 && v.length <= max ? v : null);
   const name = cleanName(b.name) ?? "Рыбак";
   // прогресс приходит с клиента — приводим его к разумному виду, прежде чем считать рейтинг
   const clean = sanitizeSave(data);
@@ -62,6 +64,15 @@ export async function PUT(req: Request) {
       playSeconds: num(stats.playSeconds),
       level: levelFromXp(num(save.xp)),
       achievements: clean.achievements,
+      // Снимок мира: по нему друзья видят, где сейчас лодка и на чём он ходит.
+      // Идентификаторы уже приведены к валидным в sanitizeSave().
+      location: str(save.location, 32),
+      spot: str(save.spot, 48),
+      port: str(save.port, 32),
+      atPort: save.atPort === true,
+      weather: str(save.weather, 24),
+      boat: num(save.boat),
+      gameDay: Math.max(1, Math.floor(num(save.minutes) / MIN_PER_DAY) + 1),
     };
     await db.insert(saves).values(values).onConflictDoUpdate({ target: saves.playerId, set: { ...values, updatedAt: sql`now()` } });
     return json({ ok: true });

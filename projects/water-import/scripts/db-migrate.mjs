@@ -68,6 +68,25 @@ try {
             );
             create index if not exists rate_limits_reset_idx on public.rate_limits (reset_at);`,
     },
+    {
+      name: 'friendships',
+      sql: `create table if not exists public.friendships (
+              id serial primary key,
+              a_user_id varchar(40) not null references public.users(id) on delete cascade,
+              b_user_id varchar(40) not null references public.users(id) on delete cascade,
+              requested_by varchar(40) not null references public.users(id) on delete cascade,
+              status varchar(12) not null default 'pending',
+              created_at timestamptz not null default now(),
+              updated_at timestamptz not null default now(),
+              accepted_at timestamptz,
+              constraint friendships_pair_ordered check (a_user_id < b_user_id),
+              constraint friendships_status_known check (status in ('pending', 'accepted'))
+            );
+            create unique index if not exists friendships_pair_uq on public.friendships (a_user_id, b_user_id);
+            create index if not exists friendships_a_idx on public.friendships (a_user_id, status);
+            create index if not exists friendships_b_idx on public.friendships (b_user_id, status);
+            alter table public.friendships enable row level security;`,
+    },
   ];
   for (const t of later) {
     const has = await client.query("select to_regclass('public.' || $1)::text as t", [t.name]);
@@ -79,6 +98,30 @@ try {
     }
   }
 
+  // Колонки, которых не было в базовой схеме. Применяются всегда и идемпотентно:
+  // на существующей базе create table if not exists их не добавит.
+  const alters = [
+    {
+      label: 'снимок мира в saves (локация, место, порт, погода, лодка, день)',
+      sql: `alter table public.saves add column if not exists location varchar(32);
+            alter table public.saves add column if not exists spot varchar(48);
+            alter table public.saves add column if not exists port varchar(32);
+            alter table public.saves add column if not exists at_port boolean not null default false;
+            alter table public.saves add column if not exists weather varchar(24);
+            alter table public.saves add column if not exists boat integer not null default 0;
+            alter table public.saves add column if not exists game_day integer not null default 1;
+            create index if not exists saves_location_idx on public.saves (location);`,
+    },
+    {
+      label: 'приватность в players (скрыть своё местоположение от друзей)',
+      sql: `alter table public.players add column if not exists hide_location boolean not null default false;`,
+    },
+  ];
+  for (const a of alters) {
+    await client.query(a.sql);
+    console.log(`→ ${a.label}: готово`);
+  }
+
   console.log('→ применяю политики доступа (supabase/security.sql)');
   await client.query(read('security.sql'));
 
@@ -88,10 +131,11 @@ try {
   const requiredColumns = {
     users: ['id', 'username', 'username_lower', 'password_hash', 'role', 'created_at', 'last_login_at'],
     sessions: ['id', 'user_id', 'created_at', 'expires_at', 'user_agent'],
-    players: ['id', 'user_id', 'name', 'created_at', 'last_seen_at'],
-    saves: ['player_id', 'data', 'version', 'money', 'codex_count', 'total_caught', 'play_seconds', 'level', 'achievements', 'updated_at'],
+    players: ['id', 'user_id', 'name', 'created_at', 'last_seen_at', 'hide_location'],
+    saves: ['player_id', 'data', 'version', 'money', 'codex_count', 'total_caught', 'play_seconds', 'level', 'achievements', 'location', 'spot', 'port', 'at_port', 'weather', 'boat', 'game_day', 'updated_at'],
     catches: ['id', 'player_id', 'fish_id', 'weight', 'variant', 'location_id', 'game_day', 'created_at'],
     rate_limits: ['key', 'count', 'reset_at'],
+    friendships: ['id', 'a_user_id', 'b_user_id', 'requested_by', 'status', 'created_at', 'updated_at', 'accepted_at'],
   };
   const tableNames = Object.keys(requiredColumns);
   const columnRows = await client.query(

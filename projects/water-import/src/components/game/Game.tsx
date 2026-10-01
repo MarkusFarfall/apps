@@ -19,6 +19,7 @@ import { CatchModal, CodexModal, fmt, PortModal, type PortTab } from "./Panels";
 import { TravelChoice, TravelOverlay } from "./Travel";
 import { PortHub } from "./PortHub";
 import { RestTransition } from "./RestTransition";
+import { FriendsModal, useFriends } from "./Friends";
 
 const CAM_NAMES: Record<CamMode, string> = { auto: "авто", surface: "поверхность", hook: "за снастью", bottom: "дно" };
 const MOON_NAMES = ["Новолуние", "Молодая луна", "Первая четверть", "Прибывающая", "Полнолуние", "Убывающая", "Последняя четверть", "Старая луна"];
@@ -41,7 +42,7 @@ export default function Game() {
   const [boot, setBoot] = useState<Boot>({ state: "loading" });
   const [playing, setPlaying] = useState(false);
   const [resting, setResting] = useState(false);
-  const [panel, setPanel] = useState<null | "codex" | "port" | "journal">(null);
+  const [panel, setPanel] = useState<null | "codex" | "port" | "journal" | "friends">(null);
   const [letter, setLetter] = useState<number | null>(null);
   const [tripReq, setTripReq] = useState<Trip | null>(null);
   const [travelling, setTravelling] = useState<{ trip: Trip; mode: TravelMode } | null>(null);
@@ -54,6 +55,8 @@ export default function Game() {
   const [authOpen, setAuthOpen] = useState<null | "profile">(null);
   const [camMode, setCamModeState] = useState<CamMode>("auto");
   const [cloud, setCloud] = useState<string>("проверка…");
+  /** Друзья: список, заявки и значок на кнопке. Работает и до начала игры. */
+  const friends = useFriends(account.user?.id ?? null);
   const [, force] = useReducer((x: number) => x + 1, 0);
   const [name, setName] = useState("");
   const lastRemote = useRef(0);
@@ -390,7 +393,7 @@ export default function Game() {
     audioRef.current.setMuffled(playing && (panel !== null || letter !== null || authOpen !== null));
   }, [engine, playing, panel, letter, authOpen, travelling, tripReq, engine.s.atPort, boot.state]);
 
-  const openPanel = useCallback((p: "codex" | "journal") => {
+  const openPanel = useCallback((p: "codex" | "journal" | "friends") => {
     audioRef.current.ui("open");
     setPanel((cur) => (cur === p ? null : cur === "port" ? cur : p));
   }, []);
@@ -440,6 +443,7 @@ export default function Game() {
       if (ev.code === "Space") { ev.preventDefault(); if (!ev.repeat && !panel && !letter && !engine.lastCatch && !engine.lastFind && !engine.s.atPort && !tripReq) engine.pointerDown(); }
       else if (ev.code === "KeyC") openPanel("codex");
       else if (ev.code === "KeyJ") openPanel("journal");
+      else if (ev.code === "KeyF") openPanel("friends");
       else if (ev.code === "KeyP" && !panel) openPort();
       else if (ev.code === "KeyV" && !panel) cycleCam();
       else if (ev.code === "KeyM") setSettings({ ...settings, sound: !settings.sound });
@@ -584,6 +588,7 @@ export default function Game() {
                     <span className="text-[#ece6d8]">{account.user?.username ?? "—"}</span>
                   </div>
                   <div className="flex gap-1.5">
+                    <button className="btn btn-sm btn-quiet" onClick={() => openPanel("friends")}>Друзья{friends.pending > 0 ? ` · ${friends.pending}` : ""}</button>
                     <button className="btn btn-sm btn-quiet" onClick={() => { audio.ui("click"); setAuthOpen("profile"); }}>Профиль</button>
                     <button className="btn btn-sm" onClick={() => { audio.ui("click"); void onLogout(); }}>Выйти</button>
                   </div>
@@ -600,6 +605,8 @@ export default function Game() {
 
       {boot.state === "auth" && <AuthScreen onReady={onAuthed} offline={account.offline} onUi={() => audioRef.current.ui("click")} />}
       {authOpen === "profile" && account.user && <ProfileModal account={account} sync={cloud} onClose={() => setAuthOpen(null)} onLogout={onLogout} onDeleted={onDeleted} />}
+      {/* Друзья доступны и на титуле, поэтому рендерим вне блока активной игры. */}
+      {panel === "friends" && <FriendsModal state={friends} me={account.user?.id ?? null} onClose={closePanel} onUi={(k) => audioRef.current.ui(k ?? "click")} />}
 
       {playing && engine.s.atPort && !travelling && (
         <PortHub engine={engine} hot={portScene0.hot} compact={view.compact} onOpen={openBuilding} onTravel={requestTrip} onJournal={() => openPanel("journal")} onCodex={() => openPanel("codex")} account={account} onAccount={() => setAuthOpen("profile")} />
@@ -677,6 +684,7 @@ export default function Game() {
               <AccountBadge account={account} compact onClick={() => setAuthOpen("profile")} />
               <button className="iconbtn" onClick={() => openPanel("journal")} title="Журнал [J]"><Icon name="journal" size={16} />{(engine.perkPoints > 0 || engine.hasLetter || engine.daily.tasks.some((t) => t.done && !t.claimed)) && <span className="dot" />}</button>
               <button className="iconbtn" onClick={() => openPanel("codex")} title="Кодекс [C]"><Icon name="book" size={16} /></button>
+              <button className="iconbtn" onClick={() => openPanel("friends")} title="Друзья [F]"><Icon name="friends" size={16} />{friends.pending > 0 && <span className="dot" />}</button>
               <button className="iconbtn" onClick={openPort} title={`В порт ${PORT_BY_ID[engine.nearestPort()].name} [P]`}><Icon name="anchor" size={16} /><span className="normal-case tracking-normal">{PORT_BY_ID[engine.nearestPort()].name}</span></button>
             </div>
           </div>
@@ -702,6 +710,7 @@ export default function Game() {
                     <button className="iconbtn" onClick={cycleCam} aria-label="Камера"><Icon name="target" size={16} /></button>
                     <button className="iconbtn" onClick={() => openPanel("journal")} aria-label="Журнал"><Icon name="journal" size={16} />{(engine.perkPoints > 0 || engine.hasLetter || engine.daily.tasks.some((t) => t.done && !t.claimed)) && <span className="dot" />}</button>
                     <button className="iconbtn" onClick={() => openPanel("codex")} aria-label="Кодекс"><Icon name="book" size={16} /></button>
+                    <button className="iconbtn" onClick={() => openPanel("friends")} aria-label="Друзья"><Icon name="friends" size={16} />{friends.pending > 0 && <span className="dot" />}</button>
                     <button className="iconbtn" onClick={openPort} aria-label="Порт"><Icon name="anchor" size={16} /></button>
                   </div>
                   <div className="glass num flex items-center gap-3 whitespace-nowrap px-3 py-1.5 text-[12px]">

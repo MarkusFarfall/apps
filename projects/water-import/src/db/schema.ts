@@ -1,4 +1,5 @@
-import { index, integer, jsonb, pgTable, real, serial, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { boolean, check, index, integer, jsonb, pgTable, real, serial, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 
 // Учётные записи
 export const users = pgTable(
@@ -50,6 +51,8 @@ export const players = pgTable(
     name: varchar("name", { length: 48 }).notNull().default("Рыбак"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Приватность: не показывать друзьям, где сейчас лодка. */
+    hideLocation: boolean("hide_location").notNull().default(false),
   },
   (t) => [uniqueIndex("players_user_uq").on(t.userId)],
 );
@@ -69,9 +72,18 @@ export const saves = pgTable(
     playSeconds: integer("play_seconds").notNull().default(0),
     level: integer("level").notNull().default(1),
     achievements: integer("achievements").notNull().default(0),
+    // ── снимок мира: нужен, чтобы показывать друзьям «где он сейчас и на чём»
+    // без разбора JSON на каждый запрос. Заполняется при каждом сохранении.
+    location: varchar("location", { length: 32 }),
+    spot: varchar("spot", { length: 48 }),
+    port: varchar("port", { length: 32 }),
+    atPort: boolean("at_port").notNull().default(false),
+    weather: varchar("weather", { length: 24 }),
+    boat: integer("boat").notNull().default(0),
+    gameDay: integer("game_day").notNull().default(1),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("saves_codex_idx").on(t.codexCount)],
+  (t) => [index("saves_codex_idx").on(t.codexCount), index("saves_location_idx").on(t.location)],
 );
 
 // Журнал уловов — для рекордов
@@ -90,4 +102,40 @@ export const catches = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("catches_fish_idx").on(t.fishId, t.weight), index("catches_player_idx").on(t.playerId)],
+);
+
+/**
+ * Дружба между аккаунтами.
+ *
+ * Пара хранится ОДНОЙ строкой и в нормализованном виде: `aUserId < bUserId`
+ * (лексикографически). Тогда «дружба» симметрична, дубликаты невозможны
+ * (уникальный индекс по паре), а «входящая/исходящая заявка» различается
+ * полем `requestedBy`. Статус `pending` — заявка, `accepted` — дружба.
+ * Отклонение и удаление просто убирают строку: повторная заявка разрешена.
+ */
+export const friendships = pgTable(
+  "friendships",
+  {
+    id: serial("id").primaryKey(),
+    aUserId: varchar("a_user_id", { length: 40 })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    bUserId: varchar("b_user_id", { length: 40 })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    requestedBy: varchar("requested_by", { length: 40 })
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: varchar("status", { length: 12 }).notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("friendships_pair_uq").on(t.aUserId, t.bUserId),
+    index("friendships_a_idx").on(t.aUserId, t.status),
+    index("friendships_b_idx").on(t.bUserId, t.status),
+    check("friendships_pair_ordered", sql`${t.aUserId} < ${t.bUserId}`),
+    check("friendships_status_known", sql`${t.status} in ('pending', 'accepted')`),
+  ],
 );
