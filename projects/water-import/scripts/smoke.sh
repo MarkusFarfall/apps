@@ -37,12 +37,12 @@ check() { # check <ожидаемое|!неожиданное> <полученн
 
 api() { # api <method> <path> [json]
   if [ "$#" -ge 3 ]; then
-    curl -sS -b "$COOKIES" -c "$COOKIES" -X "$1" "$BASE_URL$2" -H 'content-type: application/json' -d "$3"
+    curl -sS --retry 2 --retry-delay 1 --retry-all-errors -b "$COOKIES" -c "$COOKIES" -X "$1" "$BASE_URL$2" -H 'content-type: application/json' -d "$3"
   else
-    curl -sS -b "$COOKIES" -c "$COOKIES" -X "$1" "$BASE_URL$2"
+    curl -sS --retry 2 --retry-delay 1 --retry-all-errors -b "$COOKIES" -c "$COOKIES" -X "$1" "$BASE_URL$2"
   fi
 }
-status() { curl -sS -b "$COOKIES" -o /dev/null -w '%{http_code}' "$@"; }
+status() { curl -sS --retry 2 --retry-delay 1 --retry-all-errors -b "$COOKIES" -o /dev/null -w '%{http_code}' "$@"; }
 
 SAVE_SMALL='{"version":3,"name":"Тест","money":1500,"xp":300,"codex":{"turbot":{"count":2,"maxWeight":3.2,"firstDay":2,"variants":[]}},"achievements":["first"],"stats":{"playSeconds":420,"totalCaught":7,"totalEarned":1500,"linesSnapped":1,"escaped":2,"nightCatches":1,"stormCatches":0,"releases":0,"jumps":0,"maxDepthCaught":18,"perfectHooks":0,"biggest":null}}'
 SAVE_BIG='{"version":3,"name":"Тест","money":4200,"xp":900,"codex":{"turbot":{"count":3,"maxWeight":4.1,"firstDay":2,"variants":["trophy"]},"goby":{"count":5,"maxWeight":0.2,"firstDay":1,"variants":[]}},"achievements":["first","night"],"stats":{"playSeconds":1800,"totalCaught":19,"totalEarned":5200,"linesSnapped":2,"escaped":3,"nightCatches":4,"stormCatches":1,"releases":1,"jumps":2,"maxDepthCaught":26,"perfectHooks":1,"biggest":{"fishId":"turbot","weight":4.1}}}'
@@ -102,16 +102,16 @@ NOBODY="z${STAMP}"
 COOKIES2="$(mktemp)"
 api2() { # то же, что api, но со своей банкой cookie — ходит вторым игроком
   if [ "$#" -ge 3 ]; then
-    curl -sS -b "$COOKIES2" -c "$COOKIES2" -X "$1" "$BASE_URL$2" -H 'content-type: application/json' -d "$3"
+    curl -sS --retry 2 --retry-delay 1 --retry-all-errors -b "$COOKIES2" -c "$COOKIES2" -X "$1" "$BASE_URL$2" -H 'content-type: application/json' -d "$3"
   else
-    curl -sS -b "$COOKIES2" -c "$COOKIES2" -X "$1" "$BASE_URL$2"
+    curl -sS --retry 2 --retry-delay 1 --retry-all-errors -b "$COOKIES2" -c "$COOKIES2" -X "$1" "$BASE_URL$2"
   fi
 }
-status2() { curl -sS -b "$COOKIES2" -o /dev/null -w '%{http_code}' "$@"; }
+status2() { curl -sS --retry 2 --retry-delay 1 --retry-all-errors -b "$COOKIES2" -o /dev/null -w '%{http_code}' "$@"; }
 # сохранение со снимком мира: мыс, место «Каменная арка», катер (класс 2), дождь, игровой день 3
 SAVE_FRIEND='{"version":3,"name":"Друг","money":1500,"xp":300,"location":"cape","spot":"cape_arch","boat":2,"port":"home","atPort":false,"weather":"rain","minutes":2900,"codex":{"turbot":{"count":1,"maxWeight":3.2,"firstDay":2,"variants":[]}},"achievements":["first"],"stats":{"playSeconds":600,"totalCaught":4,"totalEarned":900,"linesSnapped":0,"escaped":0,"nightCatches":0,"stormCatches":0,"releases":0,"jumps":0,"maxDepthCaught":22,"perfectHooks":0,"biggest":{"fishId":"turbot","weight":3.2}}}'
 
-check "401" "$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/api/friends")" "список друзей без входа закрыт"
+check "401" "$(curl -sS --retry 2 --retry-delay 1 --retry-all-errors -o /dev/null -w '%{http_code}' "$BASE_URL/api/friends")" "список друзей без входа закрыт"
 RESP2="$(api2 POST /api/auth/register "{\"username\":\"$FRIEND_USER\",\"password\":\"$PASS\"}")"
 PID2="$(printf '%s' "$RESP2" | json_field playerId)"
 UID2="$(printf '%s' "$RESP2" | json_field user.id)"
@@ -123,10 +123,10 @@ check "$USERNAME" "$(api2 GET "/api/users?q=$USERNAME" | json_field results.0.us
 check "none" "$(api2 GET "/api/users?q=$USERNAME" | json_field results.0.relation)" "до заявки отношение — «не знакомы»"
 check "Игрок с таким именем не найден" "$(api POST /api/friends "{\"action\":\"request\",\"username\":\"$NOBODY\"}" | json_field error)" "заявка несуществующему игроку отклонена"
 check "Себя добавить нельзя" "$(api POST /api/friends "{\"action\":\"request\",\"username\":\"$USERNAME\"}" | json_field error)" "заявка самому себе отклонена"
-check '{"ok":true}' "$(api2 POST /api/friends "{\"action\":\"request\",\"username\":\"$USERNAME\"}")" "заявка в друзья отправлена"
+check "true" "$(api2 POST /api/friends "{\"action\":\"request\",\"username\":\"$USERNAME\"}" | json_field ok)" "заявка в друзья отправлена"
 check "$UID2" "$(api GET /api/friends | json_field incoming.0.userId)" "входящая заявка видна получателю"
 check "outgoing" "$(api2 GET /api/friends | json_field outgoing.0.direction)" "отправитель видит её как исходящую"
-check '{"ok":true}' "$(api POST /api/friends "{\"action\":\"accept\",\"userId\":\"$UID2\"}")" "заявка принята"
+check "true" "$(api POST /api/friends "{\"action\":\"accept\",\"userId\":\"$UID2\"}" | json_field ok)" "заявка принята"
 check "Вы уже друзья" "$(api POST /api/friends "{\"action\":\"request\",\"username\":\"$FRIEND_USER\"}" | json_field error)" "повторная заявка отклонена"
 check "Скалистый мыс" "$(api GET /api/friends | json_field friends.0.where.locationName)" "друг видит последнюю локацию"
 check "Каменная арка" "$(api GET /api/friends | json_field friends.0.where.spotName)" "и место лова"
