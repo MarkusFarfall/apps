@@ -49,6 +49,7 @@ const PATHS: Record<string, ReactNode> = {
   bird: <path d="M2 10c3-1 6 0 10 4 4-4 7-5 10-4" />,
   whale: <><path d="M2 14c0-4 5-6 11-6 4 0 6 2 7 4l2-3v7l-2-2c-2 3-6 4-10 4-5 0-8-2-8-4Z" /><path d="M9 5c0-1.5 1-2.5 2-2.5M9 5c0-1.5-1-2.5-2-2.5" /></>,
   ship: <><path d="M3 17h18l-2 3H5z" /><path d="M8 17V4M16 17V6M8 5c3 2 3 7 0 10M16 7c2.5 2 2.5 6 0 8" /></>,
+  friends: <><circle cx="9" cy="8.2" r="3.2" /><path d="M2.6 20.2c.9-3.7 3.3-5.6 6.4-5.6s5.5 1.9 6.4 5.6" /><circle cx="17.6" cy="9.6" r="2.4" /><path d="M15.4 15.1c2.7-.5 4.9 1 5.8 4" /></>,
   meteor: <><circle cx="16" cy="16" r="3" /><path d="M13.5 13.5L4 4M12 16L6 10M16 12L10 6" /></>,
   line: <path d="M3 12h18" />,
   bottle: <><path d="M10 2h4v4l2 3v12a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V9l2-3z" /><path d="M8 13h8" /></>,

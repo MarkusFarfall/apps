@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Сквозная проверка «Знакомой воды»: закрытый доступ → регистрация → сохранения → уловы → рейтинги → вход → выход.
+# Сквозная проверка «Знакомой воды»: закрытый доступ → регистрация → сохранения → уловы → рейтинги → друзья → вход → выход.
 # Гостевого режима нет: без аккаунта данные игрока недоступны (это проверяется первым делом).
 # Запуск:  BASE_URL=http://localhost:3000 bash scripts/smoke.sh
 # В конце тестовые данные удаляются автоматически (scripts/reset-test-data.mjs, нужен DATABASE_URL).
@@ -96,6 +96,55 @@ check "1" "$(api GET "/api/save?playerId=$PID" | node -e 'let r="";process.stdin
 HACKW="$(api GET "/api/save?playerId=$PID" | node -e 'let r="";process.stdin.on("data",c=>r+=c).on("end",()=>{const w=JSON.parse(r).save.codex.turbot.maxWeight;console.log(Math.abs(w-6.3)<0.01?"ограничен по виду":"НЕ ОГРАНИЧЕН: "+w)})')"
 check "ограничен по виду" "$HACKW" "вес рыбы ограничен максимумом вида"
 
+echo "── 8б. друзья: заявка, принятие, профиль, приватность"
+FRIEND_USER="friend_${STAMP}"
+NOBODY="z${STAMP}"
+COOKIES2="$(mktemp)"
+api2() { # то же, что api, но со своей банкой cookie — ходит вторым игроком
+  if [ "$#" -ge 3 ]; then
+    curl -sS -b "$COOKIES2" -c "$COOKIES2" -X "$1" "$BASE_URL$2" -H 'content-type: application/json' -d "$3"
+  else
+    curl -sS -b "$COOKIES2" -c "$COOKIES2" -X "$1" "$BASE_URL$2"
+  fi
+}
+status2() { curl -sS -b "$COOKIES2" -o /dev/null -w '%{http_code}' "$@"; }
+# сохранение со снимком мира: мыс, место «Каменная арка», катер (класс 2), дождь, игровой день 3
+SAVE_FRIEND='{"version":3,"name":"Друг","money":1500,"xp":300,"location":"cape","spot":"cape_arch","boat":2,"port":"home","atPort":false,"weather":"rain","minutes":2900,"codex":{"turbot":{"count":1,"maxWeight":3.2,"firstDay":2,"variants":[]}},"achievements":["first"],"stats":{"playSeconds":600,"totalCaught":4,"totalEarned":900,"linesSnapped":0,"escaped":0,"nightCatches":0,"stormCatches":0,"releases":0,"jumps":0,"maxDepthCaught":22,"perfectHooks":0,"biggest":{"fishId":"turbot","weight":3.2}}}'
+
+check "401" "$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/api/friends")" "список друзей без входа закрыт"
+RESP2="$(api2 POST /api/auth/register "{\"username\":\"$FRIEND_USER\",\"password\":\"$PASS\"}")"
+PID2="$(printf '%s' "$RESP2" | json_field playerId)"
+UID2="$(printf '%s' "$RESP2" | json_field user.id)"
+check "непусто" "$(if [ -n "$PID2" ] && [ -n "$UID2" ]; then echo непусто; else echo пусто; fi)" "второй игрок зарегистрирован"
+check '{"ok":true}' "$(api2 PUT /api/save "{\"playerId\":\"$PID2\",\"name\":\"Друг\",\"data\":$SAVE_FRIEND}")" "сохранение со снимком мира принято"
+check '{"ok":true}' "$(api2 POST /api/catches "{\"playerId\":\"$PID2\",\"fishId\":\"turbot\",\"weight\":3.2,\"locationId\":\"cape\",\"gameDay\":3}")" "улов второго игрока записан"
+
+check "$USERNAME" "$(api2 GET "/api/users?q=$USERNAME" | json_field results.0.username)" "поиск находит игрока по имени"
+check "none" "$(api2 GET "/api/users?q=$USERNAME" | json_field results.0.relation)" "до заявки отношение — «не знакомы»"
+check "Игрок с таким именем не найден" "$(api POST /api/friends "{\"action\":\"request\",\"username\":\"$NOBODY\"}" | json_field error)" "заявка несуществующему игроку отклонена"
+check "Себя добавить нельзя" "$(api POST /api/friends "{\"action\":\"request\",\"username\":\"$USERNAME\"}" | json_field error)" "заявка самому себе отклонена"
+check '{"ok":true}' "$(api2 POST /api/friends "{\"action\":\"request\",\"username\":\"$USERNAME\"}")" "заявка в друзья отправлена"
+check "$UID2" "$(api GET /api/friends | json_field incoming.0.userId)" "входящая заявка видна получателю"
+check "outgoing" "$(api2 GET /api/friends | json_field outgoing.0.direction)" "отправитель видит её как исходящую"
+check '{"ok":true}' "$(api POST /api/friends "{\"action\":\"accept\",\"userId\":\"$UID2\"}")" "заявка принята"
+check "Вы уже друзья" "$(api POST /api/friends "{\"action\":\"request\",\"username\":\"$FRIEND_USER\"}" | json_field error)" "повторная заявка отклонена"
+check "Скалистый мыс" "$(api GET /api/friends | json_field friends.0.where.locationName)" "друг видит последнюю локацию"
+check "Каменная арка" "$(api GET /api/friends | json_field friends.0.where.spotName)" "и место лова"
+check "2" "$(api GET /api/friends | json_field friends.0.where.boat)" "и его судно (класс 2)"
+check "rain" "$(api GET /api/friends | json_field friends.0.where.weather)" "и погоду на точке"
+check "$FRIEND_USER" "$(api GET "/api/friends/$UID2" | json_field profile.username)" "профиль друга отдаётся"
+check "3.2" "$(api GET "/api/friends/$UID2" | json_field profile.best.0.weight)" "в профиле видны лучшие уловы"
+check "Скалистый мыс" "$(api GET "/api/friends/$UID2" | json_field profile.favoriteLocation.name)" "и излюбленная акватория"
+check "true" "$(api2 POST /api/friends "{\"action\":\"privacy\",\"hideLocation\":true}" | json_field hideLocation)" "игрок скрыл своё местоположение"
+check "true" "$(api GET /api/friends | json_field friends.0.where.hidden)" "друг видит, что локация скрыта"
+check "" "$(api GET /api/friends | json_field friends.0.where.location)" "и не видит саму локацию"
+check '{"ok":true}' "$(api POST /api/friends "{\"action\":\"remove\",\"userId\":\"$UID2\"}")" "удаление из друзей"
+check "403" "$(status "$BASE_URL/api/friends/$UID2")" "после удаления профиль недоступен"
+STRANGER_ID="usr_00000000000000000000000000000000"
+check "403" "$(status2 "$BASE_URL/api/friends/$STRANGER_ID")" "профиль игрока, с которым нет дружбы, недоступен"
+check "400" "$(status2 "$BASE_URL/api/friends/usr_zz")" "профиль по malformed-идентификатору → 400"
+rm -f "$COOKIES2"
+
 echo "── 9. выход и закрытый доступ"
 check "200" "$(status -X POST "$BASE_URL/api/auth/logout")" "logout"
 check "" "$(api GET /api/auth/me | json_field user)" "сессия закрыта"
@@ -113,6 +162,11 @@ echo
 echo "── уборка тестовых данных"
 if ! node scripts/reset-test-data.mjs "$USERNAME" "$PID"; then
   echo "! удалить вручную: node scripts/reset-test-data.mjs $USERNAME $PID"
+fi
+if [ -n "${FRIEND_USER:-}" ]; then
+  if ! node scripts/reset-test-data.mjs "$FRIEND_USER" "${PID2:-}"; then
+    echo "! удалить вручную: node scripts/reset-test-data.mjs $FRIEND_USER ${PID2:-}"
+  fi
 fi
 
 exit "$FAILS"

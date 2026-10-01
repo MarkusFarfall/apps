@@ -1,4 +1,5 @@
 import { migrateSave } from "./engine";
+import type { FriendAction, FriendProfile, FriendsOverview, SearchResult } from "./friends";
 import type { CaughtFish, SaveData } from "./types";
 
 /** Локальный кэш сохранений: ключ — профиль игрока из аккаунта. Гостевого режима нет. */
@@ -145,4 +146,26 @@ export async function changePassword(current: string, next: string) {
 
 export async function deleteAccount(password: string) {
   return req("/api/auth/me", { method: "DELETE", body: JSON.stringify({ password }) });
+}
+
+// ─────────── друзья ───────────
+/** Список друзей, заявки и настройка приватности. `null` — сервер недоступен. */
+export async function fetchFriends(): Promise<FriendsOverview | null> {
+  const r = await req<FriendsOverview>("/api/friends");
+  return r.ok ? r.data : null;
+}
+
+/** Одно действие: заявка, принять, отклонить, отозвать, удалить, приватность. */
+export async function friendAction(action: FriendAction, payload: { username?: string; userId?: string; hideLocation?: boolean } = {}) {
+  return req<{ ok?: boolean; message?: string }>("/api/friends", { method: "POST", body: JSON.stringify({ action, ...payload }) });
+}
+
+/** Профиль друга: статистика, снимок мира, уловы, рекорды. */
+export async function fetchFriendProfile(userId: string) {
+  return req<{ profile?: FriendProfile }>(`/api/friends/${encodeURIComponent(userId)}`);
+}
+
+/** Поиск игроков по имени — только то, что и так видно в рейтинге. */
+export async function searchPlayers(q: string) {
+  return req<{ results?: SearchResult[]; hint?: string }>(`/api/users?q=${encodeURIComponent(q)}`);
 }
