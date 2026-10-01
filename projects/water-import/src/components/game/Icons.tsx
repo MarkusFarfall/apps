@@ -280,13 +280,12 @@ export function BaitIcon({ id, size = 20, className }: { id: string; size?: numb
 }
 
 // ───────────── прочее ─────────────
-export function MiscIcon({ name, size = 16, className }: { name: "fuel" | "fresh" | "port" | "bed" | "rumor" | "demand"; size?: number; className?: string }) {
+export function MiscIcon({ name, size = 16, className }: { name: "fuel" | "fresh" | "port" | "bed" | "demand"; size?: number; className?: string }) {
   const p: Record<string, ReactNode> = {
     fuel: <><path d="M5 20V5a1.5 1.5 0 0 1 1.5-1.5h6A1.5 1.5 0 0 1 14 5v15M3.5 20h12" /><path d="M7 7.5h5v3.5H7z" /><path d="M14 9h2a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 0 3 0V8l-2.5-2.5" /></>,
     fresh: <><path d="M12 3v18M4.5 7.5l15 9M4.5 16.5l15-9" /><path d="M10 4.5l2 1.5 2-1.5M10 19.5l2-1.5 2 1.5" /></>,
     port: <><circle cx="12" cy="5" r="2" /><path d="M12 7v13M7.5 10h9M5 14a7 7 0 0 0 14 0" /><path d="M3.5 14h3M17.5 14h3" /><path d="M2 21.5c2-1 4-1 6 0s4 1 6 0 4-1 6 0" strokeOpacity="0.6" /></>,
     bed: <><path d="M3 18V7M3 13h18v5M21 18v2M3 18v2" /><circle cx="7.5" cy="10.5" r="1.5" /><path d="M11 13v-2.5h7a3 3 0 0 1 3 3" /></>,
-    rumor: <><path d="M4 5h16v10H9l-5 4z" /><path d="M8 9h8M8 12h5" /></>,
     demand: <><path d="M4 18l5-6 4 3 7-9" /><path d="M15 6h5v5" /></>,
   };
   return (

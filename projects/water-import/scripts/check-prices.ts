@@ -6,7 +6,7 @@
  * у вида есть ставка по редкости, и ниже неё не опускает ни рынок, ни насыщение.
  */
 import { Engine } from "../src/game/engine";
-import { FISH, RARITY_INFO } from "../src/game/fish";
+import { FISH, FISH_BY_ID, RARITY_INFO } from "../src/game/fish";
 import { PORTS } from "../src/game/world";
 import type { CaughtFish } from "../src/game/types";
 
@@ -72,20 +72,40 @@ const golden = value("goby", goby.weight[0], 6);
 if (golden < RARITY_INFO.common.base * 6) bad("золотая вариация потеряла множитель");
 console.log(`  ✓ бычок 50 г: ${value("goby", goby.weight[0])} ₽, золотой — ${golden} ₽`);
 
-// ── 4. заказы платят больше рынка ──
+// ── 4. собранный заказ всегда выгоднее отдельной продажи тех же рыб ──
 const shop = new Engine();
 let minReward = Infinity;
 let minRewardCount = 0;
+let checkedOrders = 0;
 for (let i = 0; i < 400; i++) {
-  const o = (shop as unknown as { makeOrder(): { reward: number; count: number } | null }).makeOrder();
+  const o = (shop as unknown as { makeOrder(): { id: string; fishId: string; reward: number; count: number; minWeight: number; expiresDay: number; client: string } | null }).makeOrder();
   if (!o) continue;
-  if (o.reward < 100) bad(`заказ на ${o.count} шт. платит ${o.reward} ₽`);
-  if (o.reward < minReward) {
-    minReward = o.reward;
+  if (o.reward < 100) bad(`заказ на ${o.count} шт. показывает базовую оплату ${o.reward} ₽`);
+
+  const f = FISH_BY_ID[o.fishId];
+  const weight = Math.max(f.weight[0], o.minWeight);
+  shop.s.market = { day: shop.day * 10 + PORTS.indexOf(shop.port), sold: { [o.fishId]: 500 } };
+  shop.s.cooler = Array.from({ length: o.count }, (_, j) => ({
+    uid: `order-${i}-${j}`,
+    fishId: o.fishId,
+    weight,
+    variant: null,
+    value: value(o.fishId, weight),
+    day: shop.day,
+    loc: f.loc[0],
+    at: shop.s.minutes,
+  }));
+  const separateSale = [...shop.coolerQuote().values()].reduce((sum, amount) => sum + amount, 0);
+  const payout = shop.orderReward(o);
+  const minBonus = Math.max(20, Math.ceil(separateSale * 0.15));
+  if (payout < separateSale + minBonus) bad(`${f.name}: заказ ${payout} ₽, отдельная продажа ${separateSale} ₽`);
+  checkedOrders++;
+  if (payout < minReward) {
+    minReward = payout;
     minRewardCount = o.count;
   }
 }
-console.log(`  ✓ 400 заказов, минимальная награда ${minReward} ₽ (${minRewardCount} шт.)`);
+console.log(`  ✓ ${checkedOrders} собранных заказов, минимальная выплата ${minReward} ₽ (${minRewardCount} шт.; рынок насыщен)`);
 
 console.log(fails ? `\n  ПРОВАЛОВ: ${fails}` : "\n  Все проверки цен пройдены");
 process.exit(fails ? 1 : 0);

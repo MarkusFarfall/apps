@@ -18,6 +18,7 @@ import { DailyTracker, FindModal, JournalModal, LetterModal, QuestTracker, XpBar
 import { CatchModal, CodexModal, fmt, PortModal, type PortTab } from "./Panels";
 import { TravelChoice, TravelOverlay } from "./Travel";
 import { PortHub } from "./PortHub";
+import { RestTransition } from "./RestTransition";
 
 const CAM_NAMES: Record<CamMode, string> = { auto: "авто", surface: "поверхность", hook: "за снастью", bottom: "дно" };
 const MOON_NAMES = ["Новолуние", "Молодая луна", "Первая четверть", "Прибывающая", "Полнолуние", "Убывающая", "Последняя четверть", "Старая луна"];
@@ -39,6 +40,7 @@ export default function Game() {
   const pidRef = useRef<string>("");
   const [boot, setBoot] = useState<Boot>({ state: "loading" });
   const [playing, setPlaying] = useState(false);
+  const [resting, setResting] = useState(false);
   const [panel, setPanel] = useState<null | "codex" | "port" | "journal">(null);
   const [letter, setLetter] = useState<number | null>(null);
   const [tripReq, setTripReq] = useState<Trip | null>(null);
@@ -224,6 +226,7 @@ export default function Game() {
     engineRef.current.phase = "idle";
     setBoot({ state: "auth" });
     setPlaying(false);
+    setResting(false);
     setPanel(null);
     setTravelling(null);
     setTripReq(null);
@@ -240,6 +243,7 @@ export default function Game() {
     engineRef.current.phase = "idle";
     setBoot({ state: "auth" });
     setPlaying(false);
+    setResting(false);
     setPanel(null);
   }, []);
 
@@ -440,6 +444,7 @@ export default function Game() {
 
   const start = (fresh: boolean) => {
     unlockAudio();
+    audioRef.current.setActive(true);
     audio.ui("confirm");
     const e = engineRef.current;
     if (fresh) {
@@ -463,8 +468,21 @@ export default function Game() {
     engineRef.current.phase = "idle";
     setPanel(null);
     setPlaying(false);
+    setResting(false);
     setBoot({ state: "title", save: null });
   };
+
+  const startRest = useCallback(() => {
+    if (resting || engine.restBlock) return;
+    audioRef.current.init();
+    audioRef.current.play("rest");
+    setResting(true);
+  }, [engine, resting]);
+  const finishRest = useCallback(() => {
+    const rested = engine.restUntilDawn();
+    setResting(false);
+    if (rested) void persist(true);
+  }, [engine, persist]);
 
   const s = engine.s;
   const maxD = engine.maxDepth;
@@ -897,10 +915,11 @@ export default function Game() {
           {engine.phase === "caught" && engine.lastFind && <FindModal engine={engine} />}
           {panel === "codex" && <CodexModal engine={engine} onClose={closePanel} />}
           {panel === "journal" && <JournalModal engine={engine} onClose={closePanel} settings={settings} setSettings={setSettings} />}
-          {panel === "port" && <PortModal key={portTab} engine={engine} cloud={cloud} initialTab={portTab} onClose={closePanel} onTravel={requestTrip} onReset={reset} />}
+          {panel === "port" && <PortModal key={portTab} engine={engine} cloud={cloud} initialTab={portTab} onClose={closePanel} onTravel={requestTrip} onRest={startRest} onReset={reset} />}
           {letter !== null && <LetterModal engine={engine} index={letter} onClose={() => { audio.ui("paper"); setLetter(null); }} />}
         </>
       )}
+      {resting && playing && <RestTransition portName={engine.port.name} onComplete={finishRest} />}
     </div>
   );
 }

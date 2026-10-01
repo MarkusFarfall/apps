@@ -47,7 +47,7 @@ export const TIME_SCALE = 5 / 11; // примерно 1 игровая мину�
 export type Phase = "idle" | "charging" | "casting" | "sinking" | "waiting" | "bite" | "fight" | "caught";
 export type Sfx =
   | "cast" | "splash" | "bite" | "hook" | "snap" | "escape" | "catch" | "legend" | "newSpecies"
-  | "coins" | "thunder" | "event" | "buy" | "jump" | "bottom" | "reelIn" | "travel" | "levelUp" | "quest" | "perfect" | "find";
+  | "coins" | "thunder" | "event" | "buy" | "jump" | "bottom" | "reelIn" | "travel" | "levelUp" | "quest" | "perfect" | "find" | "rest";
 
 export interface Hooked {
   fish: FishDef;
@@ -1293,22 +1293,6 @@ export class Engine {
     return null;
   }
 
-  get rumorPrice() { return Math.round((250 + Object.keys(this.s.codex).length * 12) * this.port.priceMult / 10) * 10; }
-
-  /** Купить слух в таверне: условия клёва неизвестного вида местных вод */
-  buyRumor() {
-    const pool = FISH.filter((f) => !this.s.codex[f.id] && !this.s.hints.includes(f.id));
-    const local = pool.filter((f) => this.port.serves.includes(f.loc[0]));
-    const src = local.length ? local : pool;
-    if (!src.length || this.s.money < this.rumorPrice) return null;
-    this.s.money -= this.rumorPrice;
-    const f = src[ri(src.length)];
-    this.s.hints.push(f.id);
-    this.sfx.push("quest");
-    this.markDirty();
-    return f;
-  }
-
   private fixWeatherForClimate() {
     const c = this.loc.climate;
     const w = this.s.weather;
@@ -1482,19 +1466,46 @@ export class Engine {
     return this.s.cooler.filter((c) => c.fishId === o.fishId && c.weight >= o.minWeight).sort((a, b) => a.weight - b.weight);
   }
 
+  /**
+   * Пока заказ не собран, показываем базовую оплату. Для готового заказа
+   * считаем, сколько те же рыбы принесли бы при отдельной продаже, и добавляем
+   * минимум 15% (не меньше 20 ₽), сохраняя при этом базовую награду заказа.
+   */
+  orderReward(o: Order) {
+    const selected = this.orderMatches(o).slice(0, o.count);
+    if (selected.length < o.count) return o.reward;
+
+    // Сначала продаём наиболее дорогие экземпляры, чтобы скидка насыщения
+    // применялась так же выгодно, как при продаже садка по отдельности.
+    const sorted = selected
+      .map((c) => ({ c, firstQuote: this.marketValue(c) }))
+      .sort((a, b) => b.firstQuote - a.firstQuote);
+    const extra: Record<string, number> = {};
+    let separateSale = 0;
+    for (const { c } of sorted) {
+      const count = extra[c.fishId] ?? 0;
+      separateSale += this.marketValue(c, count);
+      extra[c.fishId] = count + 1;
+    }
+
+    const bonus = Math.max(20, Math.ceil(separateSale * 0.15));
+    return Math.max(o.reward, separateSale + bonus);
+  }
+
   fulfillOrder(id: string) {
     const o = this.s.orders.find((x) => x.id === id);
     if (!o) return false;
     const m = this.orderMatches(o);
     if (m.length < o.count) return false;
+    const reward = this.orderReward(o);
     const use = new Set(m.slice(0, o.count).map((c) => c.uid));
     this.s.cooler = this.s.cooler.filter((c) => !use.has(c.uid));
     this.s.orders = this.s.orders.filter((x) => x.id !== id);
-    this.s.money += o.reward;
-    this.s.stats.totalEarned += o.reward;
+    this.s.money += reward;
+    this.s.stats.totalEarned += reward;
     this.s.ordersDone++;
     this.dailyEvent({ k: "order" });
-    this.addXp(30 + Math.round(o.reward / 50));
+    this.addXp(30 + Math.round(reward / 50));
     this.sfx.push("coins");
     this.checkProgress();
     this.markDirty();
