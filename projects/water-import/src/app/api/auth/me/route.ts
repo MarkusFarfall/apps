@@ -21,7 +21,9 @@ export async function GET() {
 /** Удаление аккаунта (с подтверждением паролем) */
 export async function DELETE(req: Request) {
   if (!sameOrigin(req)) return fail("forbidden", 403);
-  if (!(await rateLimit("delete", 5, 15 * 60_000))) return fail("Слишком много попыток", 429);
+  const limited = await rateLimit("delete", 5, 15 * 60_000);
+  if (limited === null) return fail("Сервер временно недоступен", 503);
+  if (!limited) return fail("Слишком много попыток", 429);
   const b = await body<{ password?: string }>(req);
   try {
     const u = await currentUser();

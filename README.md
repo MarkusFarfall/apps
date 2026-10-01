@@ -18,11 +18,8 @@
 ├── site/                    каталог проектов (статический лендинг)
 │   └── index.html
 ├── projects/
-│   └── dmb-timer/           ДМБ Таймер — исходники
-│       ├── src/
-│       ├── public/
-│       ├── package.json
-│       └── README.md
+│   ├── dmb-timer/           ДМБ Таймер — исходники
+│   └── water-import/        Знакомая вода — исходники
 └── README.md                этот файл
 ```
 

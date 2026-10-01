@@ -42,7 +42,7 @@ export const SAVE_VERSION = 3;
 export type TravelMode = "sail" | "motor";
 export const gearList = (k: GearKind) => (k === "rod" ? RODS : k === "reel" ? REELS : k === "line" ? LINES : k === "hook" ? HOOKS : SONARS);
 export type Trip = { kind: "port"; port: PortId } | { kind: "loc"; loc: LocId; spot?: string };
-export const TIME_SCALE = 2; // игровых минут в реальную секунду
+export const TIME_SCALE = 5 / 11; // примерно 1 игровая минута за 2,2 реальной секунды
 
 export type Phase = "idle" | "charging" | "casting" | "sinking" | "waiting" | "bite" | "fight" | "caught";
 export type Sfx =

@@ -9,15 +9,16 @@ import { Field, PasswordField } from "./AuthFields";
  * Вход и регистрация. Гостевого режима нет: без аккаунта игра не начинается,
  * поэтому этот экран показывается сразу и закрыть его нельзя.
  */
-export function AuthScreen({ onReady }: { onReady: (user: AccountUser, playerId: string, mode: "login" | "register") => void }) {
+export function AuthScreen({ onReady, offline = false }: { onReady: (user: AccountUser, playerId: string, mode: "login" | "register") => void; offline?: boolean }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<AccountUser | null>(null);
   const [f, setF] = useState({ username: "", password: "", password2: "" });
-  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF((prev) => ({ ...prev, [k]: e.target.value }));
 
   const swap = (next: "login" | "register") => {
+    if (busy || done || next === mode) return;
     setMode(next);
     setErr(null);
     setF((prev) => ({ ...prev, password: "", password2: "" }));
@@ -42,10 +43,10 @@ export function AuthScreen({ onReady }: { onReady: (user: AccountUser, playerId:
   const mismatched = mode === "register" && f.password2.length > 0 && f.password !== f.password2;
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-stretch justify-center bg-[#02050a] sm:items-center sm:p-6">
-      <div className="reveal relative flex h-full w-full max-w-[1000px] flex-col overflow-hidden border border-[var(--line-2)] bg-[#050c14] sm:h-auto sm:max-h-[94vh] sm:rounded-[4px] md:flex-row">
+    <div className="fixed inset-0 z-[70] flex items-stretch justify-center overflow-hidden bg-[#02050a] sm:items-center sm:p-6">
+      <div className="reveal relative flex h-full min-h-0 w-full max-w-[1000px] flex-col overflow-hidden border border-[var(--line-2)] bg-[#050c14] sm:h-auto sm:max-h-[94vh] sm:rounded-[4px] md:flex-row">
         {/* ── сцена ── */}
-        <div className="relative h-[190px] w-full shrink-0 overflow-hidden md:h-auto md:w-[46%]">
+        <div className="auth-scene-panel relative w-full shrink-0 overflow-hidden md:w-[46%]">
           <AuthScene mode={mode} />
           <div className="absolute inset-0 bg-[linear-gradient(to_top,rgba(3,7,12,0.85)_0%,rgba(3,7,12,0)_55%)]" />
           <div className="absolute inset-x-0 bottom-0 p-5 sm:p-6">
@@ -67,15 +68,21 @@ export function AuthScreen({ onReady }: { onReady: (user: AccountUser, playerId:
         </div>
 
         {/* ── форма ── */}
-        <div className="flex flex-1 flex-col overflow-y-auto px-6 py-7 sm:px-10 sm:py-10">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pt-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-10 sm:py-10">
           <div className="label-brass">{mode === "login" ? "Вход в аккаунт" : "Новая учётная запись"}</div>
           <h1 className="font-serif mt-1.5 text-[32px] font-medium leading-none text-[#f1ebdd] sm:text-[38px]">
             {mode === "login" ? "Вход" : "Регистрация"}
           </h1>
 
-          <div className="seg mt-6 w-full sm:mt-7">
-            <button type="button" className={`flex-1 ${mode === "login" ? "on" : ""}`} onClick={() => swap("login")} disabled={busy || !!done}>Вход</button>
-            <button type="button" className={`flex-1 ${mode === "register" ? "on" : ""}`} onClick={() => swap("register")} disabled={busy || !!done}>Регистрация</button>
+          {offline && (
+            <div role="status" className="mt-4 border-l-2 border-[var(--color-bad)] bg-[rgba(201,115,92,0.08)] px-3 py-2 text-[12px] leading-relaxed text-[#f0c8bc]">
+              Нет связи. Войти или зарегистрироваться можно будет после восстановления соединения.
+            </div>
+          )}
+
+          <div className="seg mt-5 w-full sm:mt-7" role="group" aria-label="Способ входа">
+            <button type="button" className={`flex-1 ${mode === "login" ? "on" : ""}`} onClick={() => swap("login")} disabled={busy || !!done} aria-pressed={mode === "login"}>Вход</button>
+            <button type="button" className={`flex-1 ${mode === "register" ? "on" : ""}`} onClick={() => swap("register")} disabled={busy || !!done} aria-pressed={mode === "register"}>Регистрация</button>
           </div>
 
           <form onSubmit={submit} className="mt-6 space-y-4" noValidate>
@@ -114,7 +121,19 @@ export function AuthScreen({ onReady }: { onReady: (user: AccountUser, playerId:
             </button>
           </form>
 
-          <p className="mt-5 text-[11px] leading-relaxed dim">
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 border-t border-[var(--line)] pt-4 text-center text-[12px]">
+            <span className="muted">{mode === "register" ? "Уже есть аккаунт?" : "Впервые на воде?"}</span>
+            <button
+              type="button"
+              className="font-medium text-[#e3c996] underline decoration-[#c8a46a]/50 underline-offset-4 hover:text-white disabled:opacity-40"
+              onClick={() => swap(mode === "register" ? "login" : "register")}
+              disabled={busy || !!done}
+            >
+              {mode === "register" ? "Вернуться ко входу" : "Создать аккаунт"}
+            </button>
+          </div>
+
+          <p className="mt-4 text-[11px] leading-relaxed dim">
             Почты нет: вход по имени пользователя и паролю. Пароль можно посмотреть — глазок справа в поле.
             Прогресс хранится в облаке и доступен с любого устройства.
           </p>

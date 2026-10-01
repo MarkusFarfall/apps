@@ -13,16 +13,17 @@ import "@fontsource/inter/700.css";
 import type { ReactNode } from "react";
 import "./globals.css";
 
-// Адрес площадки нужен для абсолютных OpenGraph-ссылок. Если SITE_URL не задан,
-// metadataBase не подставляем: Next.js сам возьмёт адрес деплоя на Vercel
-// (VERCEL_PROJECT_PRODUCTION_URL), а локально — http://localhost:3000.
-const siteUrl = process.env.SITE_URL;
+// Адрес площадки нужен для абсолютных OpenGraph-ссылок. Берём явно заданный SITE_URL,
+// иначе домен production-проекта на Vercel, а локально — адрес dev-сервера.
+const siteUrl = process.env.SITE_URL ?? (process.env.VERCEL_PROJECT_PRODUCTION_URL
+  ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+  : "http://localhost:3000");
 
 export const metadata: Metadata = {
   title: "Знакомая вода — симулятор морской рыбалки",
   description: "Лодка, удочка, море и одинокий рыбак на рассвете. Двенадцать акваторий, триста видов рыб, пять портов, погода, сезоны и ежедневные задания.",
   applicationName: "Знакомая вода",
-  ...(siteUrl ? { metadataBase: new URL(siteUrl) } : {}),
+  metadataBase: new URL(siteUrl),
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [

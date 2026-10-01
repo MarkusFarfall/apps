@@ -7,7 +7,8 @@ export default function OfflinePage() {
       <div className="label-brass">Знакомая вода</div>
       <h1 className="font-serif text-[34px] font-medium leading-tight text-[#f1ebdd]">Нет связи</h1>
       <p className="max-w-[380px] text-[13px] leading-relaxed muted">
-        Игра сохранена на устройстве и откроется, как только появится сеть. Прогресс не потеряется.
+        Если вы уже входили на этом устройстве, перезагрузите страницу — игра продолжится из локального сохранения.
+        Первый вход требует сети; облачный прогресс синхронизируется после восстановления соединения.
       </p>
       <button onClick={() => location.reload()} className="btn btn-solid h-11 px-6">Попробовать снова</button>
     </main>

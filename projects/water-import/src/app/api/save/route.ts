@@ -23,7 +23,9 @@ export async function GET(req: Request) {
 
 export async function PUT(req: Request) {
   if (!sameOrigin(req)) return fail("forbidden", 403);
-  if (!(await rateLimit("save", 120, 60_000))) return fail("Слишком часто: подождите минуту", 429);
+  const limited = await rateLimit("save", 120, 60_000);
+  if (limited === null) return fail("Сервер временно недоступен", 503);
+  if (!limited) return fail("Слишком часто: подождите минуту", 429);
   const b = await body<{ playerId?: string; name?: string; data?: Record<string, unknown>; force?: boolean }>(req);
   if (!b) return fail("Некорректный запрос");
   const playerId = b.playerId ?? "";

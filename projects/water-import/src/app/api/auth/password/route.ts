@@ -8,7 +8,9 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   if (!sameOrigin(req)) return fail("forbidden", 403);
-  if (!(await rateLimit("password", 6, 15 * 60_000))) return fail("Слишком много попыток", 429);
+  const limited = await rateLimit("password", 6, 15 * 60_000);
+  if (limited === null) return fail("Сервер временно недоступен", 503);
+  if (!limited) return fail("Слишком много попыток", 429);
   const b = await body<{ current?: string; next?: string }>(req);
   try {
     const u = await currentUser();

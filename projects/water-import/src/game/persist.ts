@@ -3,12 +3,53 @@ import type { CaughtFish, SaveData } from "./types";
 
 /** Локальный кэш сохранений: ключ — профиль игрока из аккаунта. Гостевого режима нет. */
 const saveKey = (pid: string) => `zv_save:${pid}`;
+const rememberedAccountKey = "zv_last_account:v1";
 
 export interface AccountUser {
   id: string;
   username: string;
   createdAt: string;
 }
+
+interface RememberedAccount {
+  playerId: string;
+  user: AccountUser;
+}
+
+/** Только идентификатор профиля и имя — никаких паролей или токенов. Нужен для офлайн-старта. */
+export function rememberAccount(playerId: string, user: AccountUser) {
+  try {
+    localStorage.setItem(rememberedAccountKey, JSON.stringify({ playerId, user } satisfies RememberedAccount));
+  } catch {
+    /* local storage недоступен */
+  }
+}
+
+export function loadRememberedAccount(): RememberedAccount | null {
+  try {
+    const raw = localStorage.getItem(rememberedAccountKey);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<RememberedAccount>;
+    const user = value.user;
+    if (
+      typeof value.playerId !== "string" || !/^[a-zA-Z0-9-]{8,64}$/.test(value.playerId) ||
+      !user || typeof user.id !== "string" || typeof user.username !== "string" ||
+      typeof user.createdAt !== "string" || user.username.length > 24
+    ) return null;
+    return { playerId: value.playerId, user };
+  } catch {
+    return null;
+  }
+}
+
+export function forgetRememberedAccount() {
+  try {
+    localStorage.removeItem(rememberedAccountKey);
+  } catch {
+    /* local storage недоступен */
+  }
+}
+
 export interface AccountStats {
   level: number;
   codexCount: number;
