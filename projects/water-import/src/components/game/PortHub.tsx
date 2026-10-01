@@ -104,7 +104,7 @@ export function PortHub({ engine, hot, compact, onOpen, onTravel, onJournal, onC
   const [depart, setDepart] = useState(false);
   const w = WEATHER_INFO[s.weather];
   const hh = String(Math.floor(engine.hour)).padStart(2, "0");
-  const mm = String(Math.floor(((engine.hour % 1) * 60) / 10) * 10).padStart(2, "0");
+  const mm = String(Math.floor(engine.s.minutes % 60)).padStart(2, "0");
   const ready = s.orders.filter((o) => engine.orderMatches(o).length >= o.count).length;
   const coolerValue = [...engine.coolerQuote().values()].reduce((a, b) => a + b, 0);
   const badges: Partial<Record<Building, string>> = {
