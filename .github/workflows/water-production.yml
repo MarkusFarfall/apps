@@ -195,7 +195,16 @@ jobs:
         run: |
           set -u
           echo "→ адрес проверок: $BASE_URL"
-          echo '→ жду, пока база на боевом адресе поднимется (сборка из Git идёт параллельно)'
+          # Сначала дожидаемся нужной сборки: Vercel выкладывает её не мгновенно,
+          # а прошлая версия тоже отвечает «здоров» — иначе проверки уходят не туда.
+          echo "→ жду деплой коммита $GITHUB_SHA"
+          for _ in $(seq 1 45); do
+            live="$(curl -sf --max-time 10 "$BASE_URL/api/version" 2>/dev/null | grep -o '"commit":"[^"]*"' | cut -d'"' -f4 || true)"
+            [ "$live" = "$GITHUB_SHA" ] && { echo "✓ прод обновлён: $live"; break; }
+            echo "  … в проде $live"
+            sleep 8
+          done
+          echo '→ жду, пока база на боевом адресе поднимется'
           for _ in $(seq 1 40); do
             if curl -sf --max-time 10 "$BASE_URL/api/health" | grep -q '"db":"up"'; then break; fi
             sleep 8
