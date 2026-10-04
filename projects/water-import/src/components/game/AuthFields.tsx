@@ -1,17 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { forwardRef, useId, useState } from "react";
+
+type P = { label: string; hint?: string; hintTone?: 'dim' | 'bad' | 'ok' } & React.InputHTMLAttributes<HTMLInputElement>;
+
+const tone = (t?: P['hintTone']) => (t === 'bad' ? 'text-[var(--color-bad)]' : t === 'ok' ? 'text-[var(--color-ok)]' : 'dim');
 
 /** Текстовое поле формы входа. */
-export function Field({ label, hint, ...p }: { label: string; hint?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+export const Field = forwardRef<HTMLInputElement, P>(function Field({ label, hint, hintTone, ...p }, ref) {
   return (
     <label className="block">
       <span className="label mb-1.5 block">{label}</span>
-      <input {...p} className="field !text-left" />
-      {hint && <span className="mt-1 block text-[11px] dim">{hint}</span>}
+      <input ref={ref} {...p} className="field !text-left" />
+      {hint && <span className={`mt-1 block text-[11px] ${tone(hintTone)}`}>{hint}</span>}
     </label>
   );
-}
+});
 
 function EyeIcon({ off }: { off: boolean }) {
   return (
@@ -33,25 +37,27 @@ function EyeIcon({ off }: { off: boolean }) {
 }
 
 /** Поле пароля: введённое можно посмотреть — нажмите на глазок. */
-export function PasswordField({ label, hint, ...p }: { label: string; hint?: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+export function PasswordField({ label, hint, hintTone, children, ...p }: P & { children?: React.ReactNode }) {
   const [show, setShow] = useState(false);
+  const id = useId();
   return (
-    <label className="block">
-      <span className="label mb-1.5 block">{label}</span>
+    <div className="block">
+      <label htmlFor={id} className="label mb-1.5 block">{label}</label>
       <span className="relative block">
-        <input {...p} type={show ? "text" : "password"} className="field !text-left !pr-12" />
+        <input {...p} id={id} type={show ? "text" : "password"} className="field !text-left !pr-12" />
         <button
           type="button"
           onClick={() => setShow((v) => !v)}
           className="dim absolute right-0 top-0 flex h-full w-11 cursor-pointer items-center justify-center transition-colors hover:text-[#ece6d8]"
           aria-label={show ? "Скрыть пароль" : "Показать пароль"}
+          aria-pressed={show}
           title={show ? "Скрыть пароль" : "Показать пароль"}
-          tabIndex={-1}
         >
           <EyeIcon off={show} />
         </button>
       </span>
-      {hint && <span className="mt-1 block text-[11px] dim">{hint}</span>}
-    </label>
+      {children}
+      {hint && <span className={`mt-1 block text-[11px] ${tone(hintTone)}`}>{hint}</span>}
+    </div>
   );
 }
