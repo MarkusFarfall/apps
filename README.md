@@ -9,6 +9,7 @@
 |---|---|---|---|
 | [**ДМБ Таймер**](projects/dmb-timer) | Дембельский таймер до секунды: стата, календарь, «сантиметр», медали, push-уведомления. PWA, работает офлайн | Vite 7 · React 19 · TypeScript · Tailwind 4 | https://dmb-timer.vercel.app |
 | [**Знакомая вода**](projects/water-import) | Симулятор морской рыбалки: 12 акваторий, 301 вид рыб, снаряжение, экономика портов. Аккаунты и облачные сохранения в Postgres | Next.js 16 · React 19 · TypeScript · Tailwind 4 · Drizzle ORM | https://znakomaya-voda.vercel.app |
+| [**Pocket Radio**](projects/pocket-radio) | Интернет-радио: свои потоки, поиск станций, подкасты, плейлисты, статистика, офлайн. Облачные аккаунты в Supabase | Vite 7 · React 19 · TypeScript · Tailwind 4 · Dexie · Supabase | после деплоя на Vercel |
 | *Сайт-каталог* (`site/`) | Страница со списком проектов — открывается на корневом домене | HTML + CSS, без сборки | https://apps-markusfarfall.vercel.app |
 
 ## Структура
@@ -19,7 +20,8 @@
 │   └── index.html
 ├── projects/
 │   ├── dmb-timer/           ДМБ Таймер — исходники
-│   └── water-import/        Знакомая вода — исходники
+│   ├── water-import/        Знакомая вода — исходники
+│   └── pocket-radio/        Pocket Radio — исходники
 └── README.md                этот файл
 ```
 
@@ -32,8 +34,10 @@
 
 ## Деплой
 
-- **Vercel, Git-интеграция.** Проекты `apps` (корневой каталог, Root Directory `site`) и `dmb-timer`
-  (Root Directory `projects/dmb-timer`) подключены к этому репозиторию.
+- **Vercel, Git-интеграция.** Проекты `apps` (корневой каталог, Root Directory `site`), `dmb-timer`
+  (Root Directory `projects/dmb-timer`) и `water-import` (Root Directory `projects/water-import`)
+  подключены к этому репозиторию. Pocket Radio — новый проект: на Vercel нужно создать запись
+  с Root Directory `projects/pocket-radio` и переменными `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
 - `main` → production. Любая другая ветка → preview-деплой с отдельным URL.
 
 ## Заметки по окружению
