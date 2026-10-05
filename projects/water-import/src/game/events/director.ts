@@ -64,7 +64,7 @@ export class EventDirector {
     this.rngState = (o.seed ?? Date.now()) >>> 0;
     this.T = o.startT ?? 0;
     this.pace = o.pace ?? 1;
-    this.next = this.T + 3 + this.rnd() * 6;
+    this.next = this.T + 520 + this.rnd() * 640;
   }
 
   /* ─────────────── служебное ─────────────── */
@@ -150,7 +150,7 @@ export class EventDirector {
   }
 
   private gap() {
-    return ((14 + this.rnd() * 30) * (1 + this.tension * 1.4)) / Math.max(0.1, this.pace);
+    return ((520 + this.rnd() * 640) * (1 + this.tension * 1.4)) / Math.max(0.1, this.pace);
   }
 
   /** Веса кандидатов в текущих условиях */
@@ -342,28 +342,11 @@ export class EventDirector {
     return out;
   }
 
-  buffList() {
-    return this.buffs.map((b) => ({ ...b, left: b.until - this.T }));
-  }
-
-  seenInfo(id: string) {
-    return this.seen[id] ?? null;
-  }
-
-  stats() {
-    return { seen: Object.keys(this.seen).filter((id) => this.byId[id]).length, total: this.catalog.length };
-  }
-
-  /** Минут до следующего броска */
-  get nextIn() {
-    return Math.max(0, this.next - this.T);
-  }
-
   /* ─────────────── сохранение и совместимость ─────────────── */
 
   save(): DirectorSave {
     return {
-      v: 1,
+      v: 2,
       T: this.T,
       next: this.next,
       live: this.live.map((l) => ({ ...l })),
@@ -381,7 +364,7 @@ export class EventDirector {
 
   load(input: DirectorSave) {
     const raw = input as unknown as Record<string, unknown> | null;
-    if (!raw || raw.v !== 1) return;
+    if (!raw || (raw.v !== 1 && raw.v !== 2)) return;
     const finite = (v: unknown, fallback = 0) => typeof v === 'number' && Number.isFinite(v) ? v : fallback;
     const ids = new Set(this.catalog.map((e) => e.id));
     const effects = (v: unknown): EventEffects => {
@@ -476,7 +459,9 @@ export class EventDirector {
     this.tension = Math.max(0, Math.min(1, finite(raw.tension)));
     this.drought = Math.max(0, Math.min(100_000, Math.floor(finite(raw.drought))));
     this.uid = Math.max(1, Math.floor(finite(raw.uid, this.live.length + 1)));
-    this.auto = typeof raw.auto === 'boolean' ? raw.auto : true;
+    // The former catalog toggle was removed; rare world events now remain enabled.
+    this.auto = true;
+    if (raw.v === 1) this.next = Math.min(100_000_000, Math.max(this.next, this.T + this.gap()));
   }
 
   /** В формат старой игры: SaveData.events и SaveData.nextEventAt */

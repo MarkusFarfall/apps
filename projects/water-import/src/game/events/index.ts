@@ -2,7 +2,7 @@ import type { Atmosphere } from '../atmosphere';
 import type { CtxInput } from './director';
 
 export * from './types';
-export { EVENTS, EVENT_BY_ID, TIER_INFO, CATEGORY_INFO, effectChips } from './catalog';
+export { EVENTS, TIER_INFO, effectChips } from './catalog';
 export { EventDirector, type CtxInput, type ActiveInfo, type DirectorOptions } from './director';
 
 /** Контекст событий из состояния атмосферы (+ данные игры, если есть) */

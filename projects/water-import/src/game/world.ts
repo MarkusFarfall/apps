@@ -159,38 +159,6 @@ export function nextWeather(cur: WeatherId, season: Season, climate: LocationDef
   return entries[0][0];
 }
 
-export interface EventDef {
-  id: string;
-  name: string;
-  desc: string;
-  icon: string;
-  duration: number; // игровые минуты
-  bite?: number;
-  rare?: number;
-  legendary?: number;
-  requires?: (ctx: { night: boolean; weather: WeatherId; loc: LocId; season: Season }) => boolean;
-}
-
-export const EVENTS: EventDef[] = [
-  { id: "shoal", name: "Косяк рыбы", desc: "Вода закипела — под лодкой идёт огромная стая!", icon: "🐟", duration: 90, bite: 2.2 },
-  { id: "gulls", name: "Чайки над водой", desc: "Птицы кружат и ныряют — рыба у поверхности.", icon: "🕊", duration: 120, bite: 1.5, requires: (c) => !c.night && c.loc !== "abyss" },
-  { id: "plankton", name: "Светящийся планктон", desc: "Море вспыхнуло голубым огнём. Глубинные жители поднимаются.", icon: "✨", duration: 180, rare: 2, requires: (c) => c.night },
-  { id: "whale", name: "Кит неподалёку", desc: "Фонтан у горизонта. Кит гонит за собой редкую рыбу.", icon: "🐋", duration: 100, rare: 1.8, requires: (c) => ["fjord", "ocean", "abyss", "kelp", "antarctic", "volcano"].includes(c.loc) },
-  { id: "ghost_ship", name: "Корабль-призрак", desc: "В тумане скрипят снасти несуществующего судна... Легенды ближе.", icon: "⚓", duration: 90, legendary: 4, rare: 1.5, requires: (c) => c.weather === "fog" },
-  { id: "meteor", name: "Звездопад", desc: "Небо расчерчено падающими звёздами. Загадай рыбу.", icon: "☄", duration: 120, legendary: 2.5, rare: 1.5, requires: (c) => c.night && (c.weather === "clear" || c.weather === "cloudy") },
-  { id: "current", name: "Холодное течение", desc: "Апвеллинг поднимает глубинную воду и её обитателей.", icon: "🌊", duration: 150, rare: 1.4, bite: 1.2 },
-  { id: "calm", name: "Мёртвый штиль", desc: "Ни ветерка. Рыба затаилась... но терпеливых ждёт крупная.", icon: "〰", duration: 120, bite: 0.6, rare: 2.2, requires: (c) => c.weather === "clear" },
-  { id: "bottle", name: "Бутылка с запиской", desc: "Волна прибила к борту старую бутылку.", icon: "🍾", duration: 1 },
-  { id: "rainbow", name: "Радуга", desc: "После дождя над морем встала радуга. Говорят, под ней клюют редкие рыбы.", icon: "🌈", duration: 90, rare: 1.6, bite: 1.2, requires: () => false },
-  { id: "dolphins", name: "Дельфины", desc: "Стая дельфинов играет у носа лодки. Хороший знак!", icon: "🐬", duration: 60, bite: 1.4, rare: 1.3, requires: (c) => ["reef", "ocean", "bay", "cape", "volcano", "kelp", "mangrove"].includes(c.loc) && !c.night },
-  { id: "calving", name: "Откол ледника", desc: "От шельфа с грохотом отошла глыба. Волна подняла со дна корм — рыба оживилась.", icon: "", duration: 80, bite: 1.8, rare: 1.3, requires: (c) => c.loc === "antarctic" },
-  { id: "eruption", name: "Подводное извержение", desc: "Над кальдерой поднимается пар. Глубинные виды выходят к поверхности.", icon: "", duration: 100, rare: 2.2, requires: (c) => c.loc === "volcano" },
-  { id: "spawnrun", name: "Ход рыбы", desc: "Косяки идут из моря в реку на нерест. Вода в протоках живая.", icon: "", duration: 150, bite: 2, requires: (c) => (c.loc === "estuary" || c.loc === "skerries") && (c.season === 0 || c.season === 2) },
-  { id: "tide", name: "Большой прилив", desc: "Вода заливает корни и отмели. Хищники заходят кормиться.", icon: "", duration: 120, bite: 1.5, rare: 1.4, requires: (c) => c.loc === "mangrove" || c.loc === "estuary" },
-];
-
-export const EVENT_BY_ID = Object.fromEntries(EVENTS.map((e) => [e.id, e])) as Record<string, EventDef>;
-
 /** Условия открытия акватории: соседняя разведанная + кодекс + уровень (класс судна проверяется отдельно) */
 export interface Unlock { from: LocId[]; codex: number; level: number; hint: string }
 export const UNLOCKS: Partial<Record<LocId, Unlock>> = {

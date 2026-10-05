@@ -87,11 +87,6 @@ export function Icon({ name, ...rest }: P & { name: string }) {
 }
 
 export const WEATHER_ICON: Record<WeatherId, string> = { clear: "sun", cloudy: "cloud", rain: "rain", storm: "storm", fog: "fog", snow: "snow" };
-export const EVENT_ICON: Record<string, string> = {
-  shoal: "fish", gulls: "bird", plankton: "sparkle", whale: "whale", ghost_ship: "ship", meteor: "meteor",
-  current: "wave", calm: "line", bottle: "bottle", dolphins: "fin", rainbow: "rainbow",
-  calving: "snow", eruption: "meteor", spawnrun: "fish", tide: "wave",
-};
 export const FIND_ICON: Record<string, string> = {
   boot: "boot", bottle_rum: "bottle", anchor: "anchor", compass: "compass", amphora: "amphora", amber: "amber", pearl: "pearl",
   doubloon: "coin", locket: "locket", watch: "watch", nautilus: "shell", meteorite: "meteor", chest: "chest", idol: "idol",

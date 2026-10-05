@@ -175,7 +175,10 @@ export function migrateSave(raw: unknown): SaveData | null {
   s.cooler = Array.isArray(s.cooler) ? s.cooler.filter((c) => FISH_BY_ID[c.fishId]) : [];
   s.events = Array.isArray(s.events) ? s.events.filter((e) => GAME_EVENT_BY_ID[e.id]) : [];
   const rawDirector: unknown = (raw as Record<string, unknown>).eventDirector;
-  if (rawDirector && typeof rawDirector === "object" && !Array.isArray(rawDirector) && (rawDirector as Record<string, unknown>).v === 1) {
+  const directorVersion = rawDirector && typeof rawDirector === "object" && !Array.isArray(rawDirector)
+    ? (rawDirector as Record<string, unknown>).v
+    : undefined;
+  if (directorVersion === 1 || directorVersion === 2) {
     const eventT = Number.isFinite(s.minutes) ? Math.max(0, Math.min(100_000_000, s.minutes)) : base.minutes;
     const seed = ((eventT | 0) ^ (s.location.length * 0x45d9f3b) ^ 0x9e3779b9) | 0;
     const director = new EventDirector({ seed, catalog: GAME_EVENTS, startT: eventT });
@@ -315,7 +318,7 @@ export class Engine {
     const save = this.s;
     const seed = ((save.minutes | 0) ^ (save.location.length * 0x45d9f3b) ^ 0x9e3779b9) | 0;
     const director = new EventDirector({ seed, catalog: GAME_EVENTS, startT: save.minutes });
-    if (save.eventDirector && typeof save.eventDirector === "object" && save.eventDirector.v === 1) {
+    if (save.eventDirector && typeof save.eventDirector === "object" && (save.eventDirector.v === 1 || save.eventDirector.v === 2)) {
       director.load(save.eventDirector);
     } else {
       director.fromLegacy(Array.isArray(save.events) ? save.events : [], save.nextEventAt, save.minutes);
@@ -399,26 +402,12 @@ export class Engine {
     if (baitReward && baitId && baitId in BAIT_BY_ID) {
       this.s.baits[baitId] = Math.min(500, (this.s.baits[baitId] ?? 0) + Math.max(0, Math.floor(baitReward.count)));
     }
-    const chips = [
-      reward?.money ? `${reward.money > 0 ? "+" : "−"}${Math.abs(Math.round(reward.money))} ₽` : "",
-      reward?.xp ? `+${Math.round(reward.xp)} опыта` : "",
-      reward?.item && FIND_BY_ID[reward.item] ? FIND_BY_ID[reward.item].name : "",
-      reward?.bait ? `${BAIT_BY_ID[reward.bait.id as BaitId]?.name ?? reward.bait.id} ×${reward.bait.count}` : "",
-    ].filter(Boolean).join(" · ");
-    const kind = outcome.tone === "bad" ? "bad" : outcome.tone === "good" ? "event" : "info";
-    this.toast(outcome.text, kind, chips || undefined);
   }
 
   chooseEvent(uid: number, choiceId: string) {
     const outcome = this.eventDirector.choose(uid, choiceId);
     if (outcome) this.persistEventDirector(true);
     return outcome;
-  }
-
-  setEventsAuto(auto: boolean) {
-    if (this.eventDirector.auto === auto) return;
-    this.eventDirector.auto = auto;
-    this.persistEventDirector(true);
   }
 
   // ─────────── derived ───────────

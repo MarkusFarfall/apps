@@ -40,7 +40,15 @@ export function rewardChips(o: Outcome) {
  * Лента событий: предвестия, начало (с эффектами и прогрессом), выбор в находках, исходы.
  * Подписывается на EventDirector; onCue — для звука.
  */
-export function EventFeed({ director, onCue, onChoose, hidden }: { director: EventDirector; onCue?: (m: DirectorMessage) => void; onChoose: (uid: number, choiceId: string) => void; hidden?: boolean }) {
+export function EventFeed({ director, onCue, onChoose, hidden, compact = false, land = false, port = false }: {
+  director: EventDirector;
+  onCue?: (m: DirectorMessage) => void;
+  onChoose: (uid: number, choiceId: string) => void;
+  hidden?: boolean;
+  compact?: boolean;
+  land?: boolean;
+  port?: boolean;
+}) {
   const [items, setItems] = useState<Toast[]>([]);
   const [, setTick] = useState(0);
   const key = useRef(1);
@@ -74,7 +82,7 @@ export function EventFeed({ director, onCue, onChoose, hidden }: { director: Eve
       setItems((l) => {
         const next = l.filter((t) => {
           const pending = t.msg.type === 'start' && t.msg.def.choices && !t.msg.live.choice;
-          const life = pending ? 90000 : t.first ? 11000 : t.msg.type === 'outcome' ? 9000 : 7500;
+          const life = pending ? Number.POSITIVE_INFINITY : t.first ? 11000 : t.msg.type === 'outcome' ? 9000 : 7500;
           return now - t.at < life;
         });
         return next.length === l.length ? l : next;
@@ -91,6 +99,9 @@ export function EventFeed({ director, onCue, onChoose, hidden }: { director: Eve
       className={`zv-feed pointer-events-none absolute z-30 flex flex-col gap-2 transition-opacity duration-500 left-3 right-3 top-[calc(max(0.75rem,env(safe-area-inset-top))+3.1rem)] min-[820px]:left-[clamp(2rem,5vw,5rem)] min-[820px]:right-auto min-[820px]:top-auto min-[820px]:bottom-8 min-[820px]:w-[340px] min-[820px]:flex-col-reverse ${
         hidden ? 'invisible pointer-events-none opacity-0' : 'visible opacity-100'
       }`}
+      style={compact
+        ? { top: "auto", bottom: `calc(env(safe-area-inset-bottom) + ${port || !land ? "13rem" : "5.5rem"})` }
+        : port ? { top: "auto", bottom: "150px" } : undefined}
       aria-live="polite"
       aria-hidden={hidden || undefined}
     >
@@ -125,9 +136,7 @@ export function EventFeed({ director, onCue, onChoose, hidden }: { director: Eve
             style={{ borderLeft: `2px solid ${color}`, ['--tier' as string]: color }}
           >
             {t.first && <div className="zv-toast-shine pointer-events-none absolute inset-0" />}
-            <button onClick={() => close(t.key)} className="dim absolute right-1.5 top-1 px-1.5 text-base leading-none hover:text-white" aria-label="Скрыть">
-              ×
-            </button>
+            {!pending && <button onClick={() => close(t.key)} className="dim absolute right-1.5 top-1 px-1.5 text-base leading-none hover:text-white" aria-label="Скрыть">×</button>}
             <div className="flex items-start gap-2.5">
               <span className={`mt-0.5 text-xl leading-none ${msg.type === 'omen' ? 'pulse-soft' : ''}`}>{icon}</span>
               <div className="min-w-0 flex-1">
