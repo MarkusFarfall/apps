@@ -779,6 +779,35 @@ input {
   to { opacity: 0; transform: translateY(-24px); filter: blur(8px); }
 }
 
+/* На коротком экране карточка занимает правый верхний угол: звук уходит
+   вниз-влево, а форма уплотняется, чтобы кнопка входа не пряталась ниже сгиба. */
+@media (max-height: 560px) {
+  .zv-sound-toggle {
+    left: max(0.75rem, env(safe-area-inset-left));
+    right: auto;
+    top: auto;
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
+  .zv-auth-content {
+    padding-top: max(0.75rem, env(safe-area-inset-top)) !important;
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom)) !important;
+  }
+
+  .zv-auth-heading {
+    font-size: 1.6rem !important;
+    line-height: 1.1 !important;
+  }
+
+  .zv-auth-form {
+    margin-top: 0.75rem !important;
+  }
+
+  .zv-auth-form > * + * {
+    margin-block-start: 0.5rem !important;
+  }
+}
+
 /* панель: выезжает снизу на мобиле, справа с наклоном — на десктопе */
 .zv-panel-in {
   animation: zvAuthPanelInM 1s cubic-bezier(0.16, 0.9, 0.2, 1) both;

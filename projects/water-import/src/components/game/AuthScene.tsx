@@ -74,7 +74,11 @@ export const AuthScene = forwardRef<AuthSceneHandle, Props>(function AuthScene(
     let lastW = 0;
     let lastH = 0;
     const resize = () => {
-      const r = wrap.current!.getBoundingClientRect();
+      const w = wrap.current;
+      // при размонтировании React обнуляет ref раньше, чем доедут
+      // отложенный resize и последний тик ResizeObserver — просто выходим
+      if (!w) return;
+      const r = w.getBoundingClientRect();
       if (r.width < 2 || r.height < 2) return;
       lastW = r.width;
       lastH = r.height;
@@ -89,7 +93,9 @@ export const AuthScene = forwardRef<AuthSceneHandle, Props>(function AuthScene(
     };
     let resizeTimer = 0;
     const ro = new ResizeObserver(() => {
-      const r = wrap.current!.getBoundingClientRect();
+      const w = wrap.current;
+      if (!w) return;
+      const r = w.getBoundingClientRect();
       if (Math.abs(r.width - lastW) < 1 && Math.abs(r.height - lastH) < 1) return;
       // запекание слоёв не дёшево — не делаем его на каждый пиксель перетаскивания окна
       window.clearTimeout(resizeTimer);
@@ -163,7 +169,9 @@ export const AuthScene = forwardRef<AuthSceneHandle, Props>(function AuthScene(
         className="block"
         onPointerDown={(ev) => {
           if (onBeforeTap && !onBeforeTap()) return;
-          const r = canvas.current!.getBoundingClientRect();
+          const cv = canvas.current;
+          if (!cv) return;
+          const r = cv.getBoundingClientRect();
           engine.current?.tap(ev.clientX - r.left, ev.clientY - r.top);
         }}
       />
