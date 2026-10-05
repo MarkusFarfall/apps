@@ -616,7 +616,7 @@ export default function Game() {
         </div>
       )}
 
-      {boot.state === "auth" && <AuthScreen onReady={onAuthed} offline={account.offline} onUi={() => audioRef.current.ui("click")} />}
+      {boot.state === "auth" && <AuthScreen onReady={onAuthed} offline={account.offline} />}
       {authOpen === "profile" && account.user && <ProfileModal account={account} sync={cloud} onClose={() => setAuthOpen(null)} onLogout={onLogout} onDeleted={onDeleted} />}
       {/* Друзья доступны и на титуле, поэтому рендерим вне блока активной игры. */}
       {panel === "friends" && <FriendsModal state={friends} me={account.user?.id ?? null} onClose={closePanel} onUi={(k) => audioRef.current.ui(k ?? "click")} />}

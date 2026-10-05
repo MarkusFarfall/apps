@@ -1,0 +1,2498 @@
+import type { SeaSfx } from '../../../game/authAudio';
+
+/**
+ * Движок сцены входа «Знакомой воды» — v3 (оптимизированный).
+ *
+ * Производительность:
+ *  • статичное (небо, Млечный путь, горы, мыс с маяком, облака, виньетка+зерно) запекается
+ *    в offscreen-canvas при resize — в двух палитрах (ночь / рассвет), смешиваются прозрачностью;
+ *  • все свечения — готовые спрайты (drawImage), а не createRadialGradient на каждый кадр;
+ *  • пузыри и брызги рисуются одним path, сцена выше/ниже камеры не рисуется вовсе;
+ *  • quality 0..2 — снижается автоматически, если FPS проседает (см. AuthScene).
+ *
+ * Сюжет: подъём со дна → живое море → реакции на форму → улов → погружение.
+ */
+
+type RGB = [number, number, number];
+
+interface Pal {
+  skyTop: RGB;
+  skyMid: RGB;
+  skyHor: RGB;
+  glow: RGB;
+  seaFar: RGB;
+  seaNear: RGB;
+  deep: RGB;
+  abyss: RGB;
+  land1: RGB;
+  land2: RGB;
+  cloud: RGB;
+  coat: RGB;
+  boat: RGB;
+  boatDark: RGB;
+  kelp: RGB;
+}
+
+const NIGHT: Pal = {
+  skyTop: [3, 6, 18],
+  skyMid: [12, 22, 54],
+  skyHor: [62, 56, 102],
+  glow: [214, 146, 112],
+  seaFar: [24, 36, 66],
+  seaNear: [12, 28, 48],
+  deep: [5, 17, 32],
+  abyss: [1, 4, 10],
+  land1: [6, 10, 18],
+  land2: [20, 28, 52],
+  cloud: [58, 64, 100],
+  coat: [20, 22, 28],
+  boat: [92, 62, 40],
+  boatDark: [34, 22, 16],
+  kelp: [10, 34, 34],
+};
+
+const DAWN: Pal = {
+  skyTop: [16, 38, 72],
+  skyMid: [86, 116, 156],
+  skyHor: [248, 172, 116],
+  glow: [255, 198, 128],
+  seaFar: [74, 108, 136],
+  seaNear: [24, 76, 102],
+  deep: [8, 40, 60],
+  abyss: [2, 10, 20],
+  land1: [30, 36, 52],
+  land2: [70, 80, 104],
+  cloud: [255, 206, 172],
+  coat: [30, 32, 38],
+  boat: [128, 86, 52],
+  boatDark: [54, 34, 22],
+  kelp: [18, 56, 46],
+};
+
+const TOWER = 50; // высота башни маяка в единицах масштаба
+
+const mixC = (a: RGB, b: RGB, k: number): RGB => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+const css = (c: RGB, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
+const easeInOut = (p: number) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);
+const easeIn = (p: number) => p * p * p;
+
+function palAt(k: number): Pal {
+  const out = {} as Pal;
+  (Object.keys(NIGHT) as (keyof Pal)[]).forEach((key) => {
+    out[key] = mixC(NIGHT[key], DAWN[key], k);
+  });
+  return out;
+}
+
+function mulberry32(a: number) {
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* ────────────────────────── спрайты ────────────────────────── */
+
+function mk(wCss: number, hCss: number, dpr: number) {
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.ceil(wCss * dpr));
+  cv.height = Math.max(1, Math.ceil(hCss * dpr));
+  const c = cv.getContext('2d')!;
+  c.scale(dpr, dpr);
+  return [cv, c] as const;
+}
+
+const glowCache = new Map<string, HTMLCanvasElement>();
+function glowSprite(col: RGB): HTMLCanvasElement {
+  const key = `${col[0] | 0},${col[1] | 0},${col[2] | 0}`;
+  let cv = glowCache.get(key);
+  if (!cv) {
+    if (glowCache.size > 48) glowCache.clear();
+    cv = document.createElement('canvas');
+    cv.width = cv.height = 64;
+    const c = cv.getContext('2d')!;
+    const g = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, `rgba(${key},1)`);
+    g.addColorStop(0.16, `rgba(${key},0.6)`);
+    g.addColorStop(0.42, `rgba(${key},0.17)`);
+    g.addColorStop(1, `rgba(${key},0)`);
+    c.fillStyle = g;
+    c.fillRect(0, 0, 64, 64);
+    glowCache.set(key, cv);
+  }
+  return cv;
+}
+
+interface Sprites {
+  aurora: HTMLCanvasElement;
+  beam: HTMLCanvasElement;
+  rayCool: HTMLCanvasElement;
+  rayWarm: HTMLCanvasElement;
+  soft: HTMLCanvasElement;
+}
+let SPR: Sprites | null = null;
+function sprites(): Sprites {
+  if (SPR) return SPR;
+  const canvas = (w: number, h: number) => {
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    return [cv, cv.getContext('2d')!] as const;
+  };
+  // занавес северного сияния: яркий нижний край, фиолетовый верх
+  const [aurora, a] = canvas(4, 256);
+  const ag = a.createLinearGradient(0, 0, 0, 256);
+  ag.addColorStop(0, 'rgba(170,110,255,0)');
+  ag.addColorStop(0.3, 'rgba(150,110,255,0.3)');
+  ag.addColorStop(0.62, 'rgba(70,225,190,0.55)');
+  ag.addColorStop(0.87, 'rgba(110,255,170,1)');
+  ag.addColorStop(0.94, 'rgba(210,255,225,0.9)');
+  ag.addColorStop(1, 'rgba(110,255,170,0)');
+  a.fillStyle = ag;
+  a.fillRect(0, 0, 4, 256);
+  // конус луча
+  const [beam, b] = canvas(256, 64);
+  const bg = b.createLinearGradient(0, 0, 256, 0);
+  bg.addColorStop(0, 'rgba(255,238,190,1)');
+  bg.addColorStop(0.3, 'rgba(255,232,180,0.4)');
+  bg.addColorStop(1, 'rgba(255,225,170,0)');
+  b.fillStyle = bg;
+  b.beginPath();
+  b.moveTo(0, 29);
+  b.lineTo(256, 0);
+  b.lineTo(256, 64);
+  b.lineTo(0, 35);
+  b.closePath();
+  b.fill();
+  b.globalCompositeOperation = 'destination-in';
+  const bv = b.createLinearGradient(0, 0, 0, 64);
+  bv.addColorStop(0, 'rgba(0,0,0,0)');
+  bv.addColorStop(0.5, 'rgba(0,0,0,1)');
+  bv.addColorStop(1, 'rgba(0,0,0,0)');
+  b.fillStyle = bv;
+  b.fillRect(0, 0, 256, 64);
+  // подводный луч (трапеция, расширяется вниз)
+  const ray = (col: string) => {
+    const [cv, c] = canvas(128, 256);
+    const g = c.createLinearGradient(0, 0, 0, 256);
+    g.addColorStop(0, `rgba(${col},1)`);
+    g.addColorStop(0.5, `rgba(${col},0.35)`);
+    g.addColorStop(1, `rgba(${col},0)`);
+    c.fillStyle = g;
+    c.beginPath();
+    c.moveTo(46, 0);
+    c.lineTo(82, 0);
+    c.lineTo(128, 256);
+    c.lineTo(0, 256);
+    c.closePath();
+    c.fill();
+    c.globalCompositeOperation = 'destination-in';
+    const h = c.createLinearGradient(0, 0, 128, 0);
+    h.addColorStop(0, 'rgba(0,0,0,0)');
+    h.addColorStop(0.32, 'rgba(0,0,0,1)');
+    h.addColorStop(0.68, 'rgba(0,0,0,1)');
+    h.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = h;
+    c.fillRect(0, 0, 128, 256);
+    return cv;
+  };
+  const [soft, sc] = canvas(128, 128);
+  const sg = sc.createRadialGradient(64, 64, 0, 64, 64, 64);
+  sg.addColorStop(0, 'rgba(255,255,255,1)');
+  sg.addColorStop(0.5, 'rgba(255,255,255,0.4)');
+  sg.addColorStop(1, 'rgba(255,255,255,0)');
+  sc.fillStyle = sg;
+  sc.fillRect(0, 0, 128, 128);
+  SPR = { aurora, beam, rayCool: ray('175,210,245'), rayWarm: ray('255,214,160'), soft };
+  return SPR;
+}
+
+/* ────────────────────────── типы ────────────────────────── */
+
+interface Box { x: number; y: number; w: number; h: number }
+interface Star { x: number; y: number; r: number; ph: number }
+interface Cloud { x: number; y: number; w: number; sp: number; a: number; puffs: [number, number, number][] }
+interface Ripple { x: number; t0: number; amp: number; sp: number }
+interface Drop { x: number; y: number; vx: number; vy: number; life: number; r: number }
+interface Bubble { x: number; y: number; r: number; vy: number; ph: number }
+interface Mote { x: number; y: number; z: number; ph: number }
+interface Spark { x: number; y: number; vx: number; vy: number; life: number; max: number }
+interface SchoolFish { ox: number; oy: number; ph: number; len: number; sx: number; sy: number }
+interface School { yk: number; speed: number; dir: 1 | -1; off: number; fish: SchoolFish[] }
+interface Jumper { x: number; y: number; t0: number; size: number; dir: number }
+interface Shooting { x: number; y: number; t0: number; vx: number; vy: number }
+interface Kelp { x: number; h: number; ph: number; w: number }
+interface Gull { x: number; y: number; sp: number; ph: number; sz: number }
+interface Bio { x: number; y: number; life: number; max: number; r: number }
+
+type FishState = 'roam' | 'approach' | 'retreat' | 'hooked' | 'reel' | 'air' | 'caught' | 'flee';
+
+export interface EngineCallbacks {
+  onIntroDone: () => void;
+  onDiveDone: () => void;
+}
+
+export class SeaEngine {
+  private c: CanvasRenderingContext2D;
+  private cb: EngineCallbacks;
+  private W = 1;
+  private H = 1;
+  private dpr = 1;
+  private q: 0 | 1 | 2 = 2;
+  private t = 0;
+  private k = 0;
+  private kTarget = 0;
+  private reduced: boolean;
+  private rnd = mulberry32(20240611);
+  private sfx: SeaSfx | null = null;
+
+  private L = { horizon: 0, surface: 0, boatX: 0, sunX: 0, bobberX: 0, hookY: 0, lightX: 0, capeTop: 0, vis: 0, s: 1, mobile: false, seabed: 0 };
+  private surf: number[] = [];
+  private readonly step = 6;
+
+  // данные мира
+  private stars: Star[] = [];
+  private clouds: Cloud[] = [];
+  private ridgeA: number[] = [];
+  private ridgeB: number[] = [];
+  private kelp: Kelp[] = [];
+  private gulls: Gull[] = [];
+  private motes: Mote[] = [];
+  private schools: School[] = [];
+  private milky: { x: number; y: number; r: number; a: number }[] = [];
+  private milkyHaze: { x: number; y: number; r: number }[] = [];
+  private jelly: { x: number; yk: number; r: number; ph: number; hue: number }[] = [];
+  private ships: { x: number; sp: number; sz: number; ph: number }[] = [];
+  private village: { dx: number; dy: number; ph: number; warm: number }[] = [];
+  private mist: { x: number; yk: number; w: number; sp: number; a: number }[] = [];
+
+  // частицы
+  private ripples: Ripple[] = [];
+  private drops: Drop[] = [];
+  private bubbles: Bubble[] = [];
+  private sparks: Spark[] = [];
+  private bio: Bio[] = [];
+  private jumpers: Jumper[] = [];
+  private shooting: Shooting | null = null;
+  private nextJump = 2.5;
+  private nextShoot = 3;
+
+  // запечённые слои
+  private skyN: HTMLCanvasElement | null = null;
+  private skyD: HTMLCanvasElement | null = null;
+  private farN: HTMLCanvasElement | null = null;
+  private farD: HTMLCanvasElement | null = null;
+  private capeN: HTMLCanvasElement | null = null;
+  private capeD: HTMLCanvasElement | null = null;
+  private cloudN: HTMLCanvasElement[] = [];
+  private cloudD: HTMLCanvasElement[] = [];
+  private overlay: HTMLCanvasElement | null = null;
+  private skyBox: Box = { x: 0, y: 0, w: 1, h: 1 };
+  private farBox: Box = { x: 0, y: 0, w: 1, h: 1 };
+  private capeBox: Box = { x: 0, y: 0, w: 1, h: 1 };
+  private lamp = { x: 0, y: 0 };
+  private houseWin = { x: 0, y: 0 };
+  private villagePts: { x: number; y: number; ph: number; warm: number }[] = [];
+
+  // режиссура
+  private phase: 'intro' | 'idle' | 'dive' = 'intro';
+  private introT = 0;
+  private readonly introDur = 4.6;
+  private introSpeed = 1;
+  private introFired = false;
+  private diveT = 0;
+  private diveFired = false;
+  private cam = 0;
+  private shake = 0;
+  private px = 0;
+  private pxs = 0;
+
+  private boatAng = 0;
+  private boatDip = 0;
+  private boatDipV = 0;
+  private dip = 0;
+  private dipV = 0;
+  private dipTarget = 0;
+  private bend = 0.1;
+  private bendTarget = 0.1;
+  private tension = 0;
+  private flash = 0;
+
+  private fish = {
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
+    dir: 1,
+    tilt: 0,
+    st: 0,
+    ph: 0,
+    alpha: 1,
+    state: 'roam' as FishState,
+    kicked: false,
+    T: 1,
+    tail: 0,
+    spin: 0,
+    caughtAt: 0,
+  };
+
+  constructor(ctx: CanvasRenderingContext2D, cb: EngineCallbacks, reduced: boolean) {
+    this.c = ctx;
+    this.cb = cb;
+    this.reduced = reduced;
+    const r = this.rnd;
+
+    for (let i = 0; i < 110; i++) this.stars.push({ x: r(), y: Math.pow(r(), 1.4), r: 0.5 + r() * r() * 1.6, ph: r() * 10 });
+    for (let i = 0; i < 7; i++) {
+      const puffs: [number, number, number][] = [];
+      const n = 5 + Math.floor(r() * 4);
+      for (let j = 0; j < n; j++) puffs.push([(j / (n - 1) - 0.5) * 1.6 + (r() - 0.5) * 0.3, (r() - 0.6) * 0.35, 0.3 + r() * 0.35]);
+      this.clouds.push({ x: r(), y: 0.12 + r() * 0.5, w: 0.7 + r() * 0.9, sp: 3 + r() * 7, a: 0.35 + r() * 0.4, puffs });
+    }
+    const ridge = (n: number, seed: number) => {
+      const a: number[] = [];
+      for (let i = 0; i <= n; i++) {
+        const x = i / n;
+        a.push(0.55 + Math.sin(x * 6.2 + seed) * 0.22 + Math.sin(x * 17 + seed * 2) * 0.09 + Math.sin(x * 41 + seed * 3) * 0.04);
+      }
+      return a;
+    };
+    this.ridgeA = ridge(90, 1.3);
+    this.ridgeB = ridge(90, 4.1);
+    for (let i = 0; i < 16; i++) this.kelp.push({ x: r(), h: 0.35 + r() * 0.5, ph: r() * 6, w: 0.6 + r() * 0.8 });
+    for (let i = 0; i < 4; i++) this.gulls.push({ x: r(), y: 0.35 + r() * 0.35, sp: 14 + r() * 14, ph: r() * 6, sz: 0.7 + r() * 0.5 });
+    for (let i = 0; i < 90; i++) this.motes.push({ x: r(), y: r(), z: 0.3 + r() * 0.7, ph: r() * 6 });
+    for (let i = 0; i < 650; i++) {
+      const q = r();
+      const off = (r() + r() + r() - 1.5) * 0.11;
+      this.milky.push({ x: q + off * 0.45, y: 0.06 + q * 0.6 + off, r: 0.4 + r() * 0.9, a: 0.25 + r() * 0.6 });
+    }
+    for (let i = 0; i < 16; i++) {
+      const q = i / 15;
+      this.milkyHaze.push({ x: q + (r() - 0.5) * 0.05, y: 0.06 + q * 0.6 + (r() - 0.5) * 0.05, r: 0.05 + r() * 0.07 });
+    }
+    for (let i = 0; i < 6; i++) this.jelly.push({ x: r(), yk: 0.3 + r() * 1.1, r: 8 + r() * 12, ph: r() * 6, hue: r() });
+    this.ships = [
+      { x: 0.35, sp: 3.2, sz: 1, ph: 0 },
+      { x: 0.8, sp: -2.1, sz: 0.65, ph: 2 },
+    ];
+    for (let i = 0; i < 14; i++) this.village.push({ dx: r(), dy: r(), ph: r() * 6, warm: r() });
+    for (let i = 0; i < 6; i++) this.mist.push({ x: r(), yk: 0.04 + r() * 0.45, w: 0.35 + r() * 0.5, sp: 3 + r() * 6, a: 0.4 + r() * 0.5 });
+    const mkSchool = (n: number, yk: number, speed: number, dir: 1 | -1, spread: number, len: number): School => {
+      const fish: SchoolFish[] = [];
+      for (let i = 0; i < n; i++)
+        fish.push({ ox: (r() - 0.5) * spread * 2.2, oy: (r() - 0.5) * spread * 0.7, ph: r() * 6, len: len * (0.75 + r() * 0.5), sx: 0, sy: 0 });
+      return { yk, speed, dir, off: r() * 1000, fish };
+    };
+    this.schools = [mkSchool(16, 0.3, 34, 1, 60, 17), mkSchool(22, 0.9, 22, -1, 110, 22), mkSchool(10, 1.35, 16, 1, 80, 30)];
+
+    if (reduced) {
+      this.phase = 'idle';
+      this.introFired = true;
+      setTimeout(() => this.cb.onIntroDone(), 50);
+    }
+  }
+
+  /* ────────────────────────── API ────────────────────────── */
+
+  setCallbacks(cb: EngineCallbacks) {
+    this.cb = cb;
+  }
+
+  setSfx(sfx: SeaSfx | null) {
+    this.sfx = sfx;
+  }
+
+  setQuality(q: 0 | 1 | 2) {
+    this.q = q;
+  }
+
+  setMode(mode: 'login' | 'register', instant = false) {
+    this.kTarget = mode === 'register' ? 1 : 0;
+    if (instant) this.k = this.kTarget;
+  }
+
+  setPointer(nx: number) {
+    this.px = clamp(nx, -1, 1);
+  }
+
+  skipIntro() {
+    if (this.phase === 'intro') this.introSpeed = 5;
+  }
+
+  nibble() {
+    const f = this.fish;
+    if (f.state === 'roam' || f.state === 'retreat') {
+      f.state = 'approach';
+      f.st = 0;
+      f.kicked = false;
+    }
+    this.dipV += 30 * this.L.s;
+  }
+
+  bite() {
+    const f = this.fish;
+    if (f.state === 'caught' || f.state === 'air') return;
+    f.state = 'hooked';
+    f.st = 0;
+    f.alpha = 1;
+  }
+
+  release() {
+    if (this.fish.state === 'hooked') {
+      this.fish.state = 'retreat';
+      this.fish.st = 0;
+    }
+  }
+
+  fail() {
+    const f = this.fish;
+    const s = this.L.s;
+    f.state = 'flee';
+    f.st = 0;
+    f.dir = f.x < this.L.bobberX ? -1 : 1;
+    f.vx = f.dir * 520 * s;
+    f.vy = 160 * s;
+    this.dipV = -380 * s;
+    this.shake = 7;
+    this.splash(this.L.bobberX, this.sAt(this.L.bobberX), 14, 1);
+    this.ripple(this.L.bobberX, 10 * s);
+    for (let i = 0; i < 14; i++) this.spawnBubble(f.x + (this.rnd() - 0.5) * 30 * s, f.y + (this.rnd() - 0.5) * 20 * s, 1);
+    this.sfx?.bubbles(this.pan(f.x), 6);
+  }
+
+  success() {
+    const f = this.fish;
+    f.state = 'reel';
+    f.st = 0;
+    f.alpha = 1;
+    if (this.reduced) setTimeout(() => this.cb.onDiveDone(), 900);
+  }
+
+  tap(x: number, y: number) {
+    if (this.phase === 'intro') {
+      this.skipIntro();
+      return;
+    }
+    const s = this.L.s;
+    const wy = y + this.cam;
+    const sy = this.sAt(x);
+    if (wy < sy) {
+      this.ripple(x, 8 * s);
+      this.splash(x, sy, 8, 0.6);
+      return;
+    }
+    for (let i = 0; i < 12; i++) this.spawnBubble(x + (this.rnd() - 0.5) * 24 * s, wy + (this.rnd() - 0.5) * 24 * s, 1.2);
+    this.sfx?.bubbles(this.pan(x), 5);
+    if (this.k < 0.6)
+      for (let i = 0; i < 10; i++)
+        this.bio.push({ x: x + (this.rnd() - 0.5) * 40 * s, y: wy + (this.rnd() - 0.5) * 40 * s, life: 0, max: 0.8 + this.rnd(), r: (1 + this.rnd() * 1.6) * s });
+    for (const sc of this.schools) {
+      const cy = this.schoolY(sc);
+      const cx = this.schoolX(sc);
+      for (const fsh of sc.fish) {
+        const dx = cx + fsh.ox * s + fsh.sx - x;
+        const dy = cy + fsh.oy * s + fsh.sy - wy;
+        const d = Math.hypot(dx, dy);
+        if (d < 160 * s) {
+          const pw = (1 - d / (160 * s)) * 120 * s;
+          fsh.sx += (dx / (d || 1)) * pw;
+          fsh.sy += (dy / (d || 1)) * pw;
+        }
+      }
+    }
+    const f = this.fish;
+    if (f.state === 'roam' && Math.hypot(f.x - x, f.y - wy) < 140 * s) {
+      f.vx += Math.sign(f.x - x || 1) * 400 * s;
+      f.ph += 1.4;
+    }
+  }
+
+  resize(W: number, H: number, dpr: number) {
+    this.W = W;
+    this.H = H;
+    this.dpr = dpr;
+    const mobile = W < 820;
+    const panel = mobile ? 0 : Math.min(460, W * 0.4) + 56;
+    const vis = W - panel;
+    const s = mobile ? clamp(Math.min(W / 460, H / 820), 0.62, 0.95) : clamp(Math.min(W / 1500, H / 900), 0.62, 1.3);
+    const horizon = H * (mobile ? 0.22 : 0.44);
+    const surface = H * (mobile ? 0.34 : 0.61);
+    const boatX = mobile ? W * 0.42 : vis * 0.47;
+    const bobberX = Math.min(boatX + (mobile ? 140 : 200) * s, W - 26);
+    const lightX = mobile ? W * 0.13 : vis * 0.13;
+    const capeTop = horizon - (mobile ? 30 : 42) * s;
+    this.L = {
+      horizon,
+      surface,
+      boatX,
+      sunX: mobile ? W * 0.8 : vis * 0.8,
+      bobberX,
+      hookY: surface + H * (mobile ? 0.13 : 0.19),
+      lightX,
+      capeTop,
+      vis,
+      s,
+      mobile,
+      seabed: H * 1.96,
+    };
+    this.surf = new Array(Math.ceil(W / this.step) + 3).fill(surface);
+    if (this.fish.x === 0) {
+      this.fish.x = bobberX - 120 * s;
+      this.fish.y = this.L.hookY + 30 * s;
+    }
+    this.lamp = { x: lightX, y: capeTop + 1 - (TOWER + 5.7) * s };
+    this.houseWin = { x: lightX - 25.5 * s, y: capeTop - 4.5 * s };
+    this.villagePts = this.village
+      .map((v) => {
+        const x = lightX - (40 + v.dx * 200) * s;
+        return { x, y: this.capeY(x) + (2 + v.dy * 7) * s, ph: v.ph, warm: v.warm };
+      })
+      .filter((v) => v.x > -10);
+    this.bake();
+  }
+
+  /* ────────────────────────── геометрия ────────────────────────── */
+
+  /** Верхний край мыса с маяком. Плато вокруг маяка — ровное, чтобы башня стояла, а не висела. */
+  private capeY(x: number) {
+    const { lightX, s, horizon, capeTop } = this.L;
+    const d = (x - lightX) / s;
+    if (d >= 112) return horizon + 3;
+    const n = Math.sin(d * 0.13) * 1.6 + Math.sin(d * 0.37 + 1) * 0.8;
+    if (d > 26) {
+      const q = (d - 26) / 86;
+      const prof = q < 0.4 ? Math.pow(q / 0.4, 1.5) * 0.5 : 0.5 + ((q - 0.4) / 0.6) * 0.5;
+      return Math.min(horizon + 3, capeTop + (horizon - capeTop) * prof + n * s * 0.6 * q);
+    }
+    if (d >= -36) return capeTop;
+    const fall = -36 - d;
+    return Math.min(horizon - 5 * s, capeTop + fall * 0.05 * s + n * s * clamp(fall / 24, 0, 1));
+  }
+
+  private wave(x: number) {
+    const { s, surface } = this.L;
+    const t = this.t;
+    let y =
+      Math.sin((x * 0.011) / s + t * 1.05) * 5 * s +
+      Math.sin((x * 0.027) / s - t * 1.6) * 2.2 * s +
+      Math.sin((x * 0.0045) / s + t * 0.55) * 8 * s +
+      Math.sin((x * 0.06) / s + t * 2.7) * 0.8 * s;
+    for (const r of this.ripples) {
+      const age = t - r.t0;
+      const d = Math.abs(x - r.x) - age * r.sp;
+      const win = 70 * s;
+      if (Math.abs(d) < win) y += r.amp * Math.exp(-age * 1.4) * Math.cos((d * 0.11) / s) * (1 - Math.abs(d) / win);
+    }
+    return surface + y;
+  }
+
+  private sAt(x: number) {
+    const i = x / this.step;
+    const i0 = clamp(Math.floor(i), 0, this.surf.length - 2);
+    const f = clamp(i - i0, 0, 1);
+    return this.surf[i0] * (1 - f) + this.surf[i0 + 1] * f;
+  }
+
+  private pan(x: number) {
+    return clamp((x / this.W) * 2 - 1, -1, 1);
+  }
+
+  private ripple(x: number, amp: number) {
+    this.ripples.push({ x, t0: this.t, amp, sp: 90 * this.L.s });
+    if (this.ripples.length > 12) this.ripples.shift();
+  }
+
+  private splash(x: number, y: number, n: number, power: number) {
+    const s = this.L.s;
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 2 + (this.rnd() - 0.5) * 1.6;
+      const v = (140 + this.rnd() * 260) * s * power;
+      this.drops.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0, r: (1 + this.rnd() * 2.2) * s });
+    }
+    if (this.k < 0.6)
+      for (let i = 0, m = Math.min(n, 7); i < m; i++)
+        this.bio.push({ x: x + (this.rnd() - 0.5) * 50 * s, y: y + 4 * s + this.rnd() * 34 * s, life: 0, max: 0.7 + this.rnd() * 1.2, r: (1 + this.rnd() * 1.6) * s });
+    this.sfx?.splash(power * Math.min(1.3, n / 12), this.pan(x));
+  }
+
+  private spawnBubble(x: number, y: number, scale = 1) {
+    const s = this.L.s;
+    this.bubbles.push({ x, y, r: (1 + this.rnd() * 3.2) * s * scale, vy: -(50 + this.rnd() * 110) * s, ph: this.rnd() * 6 });
+    const cap = this.q === 2 ? 170 : 100;
+    if (this.bubbles.length > cap) this.bubbles.splice(0, this.bubbles.length - cap);
+  }
+
+  /** Немного медленных золотых бликов, разлетающихся веером вверх (вместо салюта из 40 частиц) */
+  private sparkle(x: number, y: number, n: number) {
+    const s = this.L.s;
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 2 + ((i / Math.max(1, n - 1)) - 0.5) * 2.4 + (this.rnd() - 0.5) * 0.25;
+      const v = (55 + this.rnd() * 55) * s;
+      this.sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0, max: 0.9 + this.rnd() * 0.5 });
+    }
+  }
+  private catchRingT = -10;
+
+  private schoolX(sc: School) {
+    const span = this.W + 600 * this.L.s;
+    const raw = (sc.off + this.t * sc.speed * this.L.s) % span;
+    return sc.dir === 1 ? raw - 300 * this.L.s : this.W + 300 * this.L.s - raw;
+  }
+
+  private schoolY(sc: School) {
+    return this.L.surface + this.H * sc.yk + Math.sin(this.t * 0.3 + sc.off) * 28 * this.L.s;
+  }
+
+  private boatPose() {
+    const { boatX, s } = this.L;
+    return { bx: boatX, by: this.sAt(boatX) - 2 * s + this.boatDip };
+  }
+
+  private toWorld(lx: number, ly: number) {
+    const { bx, by } = this.boatPose();
+    const s = this.L.s;
+    const ca = Math.cos(this.boatAng);
+    const sa = Math.sin(this.boatAng);
+    return [bx + (lx * ca - ly * sa) * s, by + (lx * sa + ly * ca) * s] as const;
+  }
+
+  private rodTipLocal() {
+    const a = -0.86 + this.bend * 0.95;
+    return [18 + Math.cos(a) * 138, -36 + Math.sin(a) * 138] as const;
+  }
+
+  private fishMouth() {
+    const f = this.fish;
+    const len = 64 * this.L.s;
+    if (f.state === 'air') return [f.x + Math.cos(f.spin) * len * 0.5, f.y + Math.sin(f.spin) * len * 0.5] as const;
+    return [f.x + f.dir * Math.cos(f.tilt) * len * 0.5, f.y + Math.sin(f.tilt) * len * 0.5] as const;
+  }
+
+  private glow(x: number, y: number, r: number, col: RGB, a: number) {
+    if (a <= 0.004 || r <= 0.5) return;
+    const c = this.c;
+    c.globalAlpha = Math.min(1, a);
+    c.drawImage(glowSprite(col), x - r, y - r, r * 2, r * 2);
+  }
+
+  /* ────────────────────────── запекание ────────────────────────── */
+
+  private bake() {
+    this.skyN = this.bakeSky(NIGHT, true);
+    this.skyD = this.bakeSky(DAWN, false);
+    this.farN = this.bakeFar(NIGHT);
+    this.farD = this.bakeFar(DAWN);
+    this.capeN = this.bakeCape(NIGHT, true);
+    this.capeD = this.bakeCape(DAWN, false);
+    this.cloudN = this.clouds.map((cl) => this.bakeCloud(cl, NIGHT, true));
+    this.cloudD = this.clouds.map((cl) => this.bakeCloud(cl, DAWN, false));
+    this.overlay = this.bakeOverlay();
+  }
+
+  private bakeSky(p: Pal, night: boolean) {
+    const { W, dpr } = this;
+    const { horizon, sunX } = this.L;
+    const top = -30;
+    const h = horizon - top + 2;
+    this.skyBox = { x: 0, y: top, w: W, h };
+    const [cv, c] = mk(W, h, dpr);
+    c.translate(0, -top);
+    const g = c.createLinearGradient(0, top, 0, horizon);
+    g.addColorStop(0, css(p.skyTop));
+    g.addColorStop(0.55, css(p.skyMid));
+    g.addColorStop(1, css(p.skyHor));
+    c.fillStyle = g;
+    c.fillRect(0, top, W, h);
+    const glowA = night ? 0.28 : 0.75;
+    const gl = c.createRadialGradient(sunX, horizon, 0, sunX, horizon, W * 0.75);
+    gl.addColorStop(0, css(p.glow, glowA));
+    gl.addColorStop(0.35, css(p.glow, glowA * 0.35));
+    gl.addColorStop(1, css(p.glow, 0));
+    c.fillStyle = gl;
+    c.fillRect(0, top, W, h);
+    if (night) {
+      c.globalCompositeOperation = 'lighter';
+      for (const hz of this.milkyHaze) {
+        const x = hz.x * W;
+        const y = hz.y * horizon * 0.95;
+        const rr = hz.r * Math.max(W, horizon * 2);
+        const mg = c.createRadialGradient(x, y, 0, x, y, rr);
+        mg.addColorStop(0, 'rgba(175,165,230,0.075)');
+        mg.addColorStop(0.5, 'rgba(140,150,215,0.03)');
+        mg.addColorStop(1, 'rgba(140,150,215,0)');
+        c.fillStyle = mg;
+        c.fillRect(x - rr, y - rr, rr * 2, rr * 2);
+      }
+      c.fillStyle = '#eef0ff';
+      for (const m of this.milky) {
+        c.globalAlpha = m.a * 0.55;
+        c.fillRect(m.x * W, m.y * horizon * 0.95, m.r, m.r);
+      }
+      const r = mulberry32(77);
+      for (let i = 0; i < 420; i++) {
+        const y = Math.pow(r(), 1.3) * horizon * 0.97;
+        c.globalAlpha = (0.12 + r() * 0.4) * (1 - (y / horizon) * 0.7);
+        c.fillRect(r() * W, y, 0.7, 0.7);
+      }
+      c.globalAlpha = 1;
+      c.globalCompositeOperation = 'source-over';
+    } else {
+      // пояс Венеры
+      const bv = c.createLinearGradient(0, horizon * 0.3, 0, horizon);
+      bv.addColorStop(0, 'rgba(255,165,190,0)');
+      bv.addColorStop(0.62, 'rgba(255,165,190,0.12)');
+      bv.addColorStop(1, 'rgba(255,165,190,0)');
+      c.fillStyle = bv;
+      c.fillRect(0, horizon * 0.3, W, horizon * 0.7);
+    }
+    return cv;
+  }
+
+  private ridgePath(c: CanvasRenderingContext2D, arr: number[], x0: number, x1: number, hgt: number, base: number) {
+    const n = arr.length - 1;
+    c.beginPath();
+    c.moveTo(x0, base + 1);
+    for (let i = 0; i <= n; i++) {
+      let e = Math.min(1, (i / n) * 5, ((n - i) / n) * 4);
+      e = e * e * (3 - 2 * e);
+      c.lineTo(x0 + ((x1 - x0) * i) / n, base - arr[i] * hgt * e);
+    }
+    c.lineTo(x1, base + 1);
+    c.closePath();
+  }
+
+  private bakeFar(p: Pal) {
+    const { W, H, dpr } = this;
+    const { horizon, s, lightX, vis, mobile } = this.L;
+    const pad = 30;
+    const top = horizon - H * 0.11;
+    const h = horizon + 2 - top;
+    this.farBox = { x: -pad, y: top, w: W + pad * 2, h };
+    const [cv, c] = mk(W + pad * 2, h, dpr);
+    c.translate(pad, -top);
+    const visW = mobile ? W : vis;
+    this.ridgePath(c, this.ridgeB, -pad, W + pad, H * 0.028, horizon);
+    c.fillStyle = css(mixC(p.land2, p.skyHor, 0.62));
+    c.fill();
+    this.ridgePath(c, this.ridgeA, lightX + 40 * s, Math.max(lightX + 320 * s, visW * 0.74), H * 0.075, horizon);
+    const mg = c.createLinearGradient(0, horizon - H * 0.075, 0, horizon);
+    mg.addColorStop(0, css(mixC(p.land2, p.skyHor, 0.22)));
+    mg.addColorStop(1, css(mixC(p.land2, p.skyHor, 0.5)));
+    c.fillStyle = mg;
+    c.fill();
+    c.strokeStyle = css(p.glow, 0.14);
+    c.lineWidth = 1;
+    c.stroke();
+    return cv;
+  }
+
+  private bakeCape(p: Pal, night: boolean) {
+    const { dpr } = this;
+    const { horizon, s, lightX, capeTop } = this.L;
+    const pad = 40;
+    const top = capeTop - (TOWER + 20) * s;
+    const right = lightX + 175 * s;
+    const w = right + pad;
+    const h = horizon + 8 - top;
+    this.capeBox = { x: -pad, y: top, w, h };
+    const [cv, c] = mk(w, h, dpr);
+    c.translate(pad, -top);
+
+    // тело мыса
+    const xEnd = lightX + 114 * s;
+    const landTop = mixC(p.land1, p.land2, night ? 0.3 : 0.45);
+    const landPath = () => {
+      c.beginPath();
+      c.moveTo(-pad, horizon + 8);
+      for (let x = -pad; x <= xEnd; x += 2) c.lineTo(x, this.capeY(x));
+      c.lineTo(xEnd, horizon + 8);
+      c.closePath();
+    };
+    landPath();
+    const g = c.createLinearGradient(0, capeTop, 0, horizon + 8);
+    g.addColorStop(0, css(landTop));
+    g.addColorStop(1, css(mixC(p.land1, [0, 0, 0], 0.35)));
+    c.fillStyle = g;
+    c.fill();
+
+    c.save();
+    landPath();
+    c.clip();
+    // освещённая сторона скалы (свет справа — луна/солнце)
+    const lg = c.createLinearGradient(lightX + 20 * s, 0, xEnd, 0);
+    lg.addColorStop(0, css(p.glow, 0));
+    lg.addColorStop(1, css(p.glow, night ? 0.09 : 0.2));
+    c.fillStyle = lg;
+    c.fillRect(lightX + 20 * s, capeTop - 4 * s, 100 * s, horizon - capeTop + 14 * s);
+    // слои породы
+    c.strokeStyle = 'rgba(0,0,0,0.28)';
+    c.lineWidth = 1;
+    for (let i = 0; i < 6; i++) {
+      const y = capeTop + (horizon - capeTop) * (0.22 + i * 0.13);
+      c.beginPath();
+      c.moveTo(lightX + 18 * s, y);
+      c.quadraticCurveTo(lightX + 70 * s, y + 3 * s, lightX + 118 * s, y - 1.5 * s);
+      c.stroke();
+    }
+    // кустарник на склоне
+    c.fillStyle = css(mixC(p.land1, [20, 40, 30], night ? 0.25 : 0.4));
+    for (let i = 0; i < 14; i++) {
+      const x = lightX - (45 + i * 15) * s + Math.sin(i * 3.1) * 6 * s;
+      const y = this.capeY(x) + 1;
+      c.beginPath();
+      c.ellipse(x, y, (5 + (i % 3) * 2) * s, (2.2 + (i % 2)) * s, 0, Math.PI, 0);
+      c.fill();
+    }
+    c.restore();
+    // подсвеченная кромка
+    c.strokeStyle = css(mixC(landTop, p.glow, night ? 0.4 : 0.65), night ? 0.55 : 0.75);
+    c.lineWidth = 1.2;
+    c.beginPath();
+    for (let x = -pad; x <= xEnd; x += 3) {
+      const y = this.capeY(x) + 0.6;
+      if (x === -pad) c.moveTo(x, y);
+      else c.lineTo(x, y);
+    }
+    c.stroke();
+
+    // камни в воде у подножия
+    const rockC = css(mixC(p.land1, p.land2, 0.3));
+    const rockRim = css(p.glow, night ? 0.28 : 0.5);
+    for (const [dx, rw, rh] of [
+      [120, 8, 7],
+      [136, 4.5, 4],
+      [150, 9, 5.5],
+      [166, 3.5, 3],
+    ]) {
+      const x = lightX + dx * s;
+      c.beginPath();
+      c.moveTo(x - rw * s, horizon + 3);
+      c.quadraticCurveTo(x - rw * 0.4 * s, horizon - rh * s, x + rw * 0.2 * s, horizon - rh * 0.9 * s);
+      c.quadraticCurveTo(x + rw * 0.8 * s, horizon - rh * 0.4 * s, x + rw * s, horizon + 3);
+      c.fillStyle = rockC;
+      c.fill();
+      c.strokeStyle = rockRim;
+      c.lineWidth = 0.8;
+      c.beginPath();
+      c.moveTo(x + rw * 0.1 * s, horizon - rh * 0.9 * s);
+      c.quadraticCurveTo(x + rw * 0.8 * s, horizon - rh * 0.4 * s, x + rw * s, horizon);
+      c.stroke();
+    }
+
+    // домики посёлка
+    c.fillStyle = css(mixC(p.land1, [0, 0, 0], 0.15));
+    for (const v of this.villagePts) {
+      const hw = 4 * s;
+      const hh = 3.6 * s;
+      c.fillRect(v.x - hw, v.y - hh, hw * 2, hh + 3 * s);
+      c.beginPath();
+      c.moveTo(v.x - hw - s, v.y - hh);
+      c.lineTo(v.x, v.y - hh - 3.2 * s);
+      c.lineTo(v.x + hw + s, v.y - hh);
+      c.fill();
+    }
+
+    // дом смотрителя
+    const hx = lightX - 24 * s;
+    const hy = capeTop + 1;
+    c.fillStyle = css(night ? mixC([160, 166, 186], p.land1, 0.62) : mixC([236, 222, 200], p.land1, 0.28));
+    c.fillRect(hx - 9 * s, hy - 9 * s, 18 * s, 9 * s);
+    c.fillStyle = 'rgba(0,0,0,0.25)';
+    c.fillRect(hx - 9 * s, hy - 9 * s, 6 * s, 9 * s);
+    c.fillStyle = css(night ? mixC([120, 50, 45], p.land1, 0.6) : mixC([150, 62, 46], p.land1, 0.25));
+    c.beginPath();
+    c.moveTo(hx - 11 * s, hy - 9 * s);
+    c.lineTo(hx - 2 * s, hy - 15.5 * s);
+    c.lineTo(hx + 11 * s, hy - 9 * s);
+    c.fill();
+    c.fillRect(hx + 4 * s, hy - 15 * s, 2.4 * s, 4.5 * s);
+    c.fillStyle = css(mixC(p.land1, [0, 0, 0], 0.4));
+    c.fillRect(hx - 3 * s, hy - 6 * s, 3 * s, 3 * s); // окно (свет — вживую)
+    c.fillRect(hx + 3 * s, hy - 5.5 * s, 2.6 * s, 5.5 * s); // дверь
+
+    // башня маяка
+    const bx = lightX;
+    const by = capeTop + 1;
+    const T = TOWER * s;
+    const wB = 7 * s;
+    const wT = 4.6 * s;
+    const bodyL = night ? mixC([172, 178, 198], p.land1, 0.48) : mixC([250, 242, 230], p.land1, 0.12);
+    const tower = () => {
+      c.beginPath();
+      c.moveTo(bx - wB, by);
+      c.lineTo(bx - wT, by - T);
+      c.lineTo(bx + wT, by - T);
+      c.lineTo(bx + wB, by);
+      c.closePath();
+    };
+    tower();
+    c.fillStyle = css(bodyL);
+    c.fill();
+    c.save();
+    tower();
+    c.clip();
+    c.fillStyle = css(night ? mixC([150, 46, 46], p.land1, 0.42) : mixC([198, 58, 44], p.land1, 0.08));
+    c.fillRect(bx - wB, by - T * 0.42, wB * 2, T * 0.14);
+    c.fillRect(bx - wB, by - T * 0.78, wB * 2, T * 0.14);
+    const sh = c.createLinearGradient(bx - wB, 0, bx + wB, 0);
+    sh.addColorStop(0, 'rgba(0,0,0,0.5)');
+    sh.addColorStop(0.5, 'rgba(0,0,0,0.05)');
+    sh.addColorStop(0.8, 'rgba(255,255,255,0)');
+    sh.addColorStop(1, css(p.glow, night ? 0.12 : 0.3));
+    c.fillStyle = sh;
+    c.fillRect(bx - wB, by - T, wB * 2, T);
+    c.restore();
+    // основание
+    c.fillStyle = css(mixC(p.land1, p.land2, 0.6));
+    c.fillRect(bx - 8.5 * s, by - 2.5 * s, 17 * s, 3 * s);
+    c.fillStyle = css(mixC(p.land1, [0, 0, 0], 0.35));
+    c.fillRect(bx - 1.4 * s, by - 6.5 * s, 2.8 * s, 4.5 * s);
+    c.fillRect(bx - 0.8 * s, by - T * 0.6, 1.6 * s, 2.6 * s);
+    // галерея с перилами
+    const gy = by - T;
+    const dark = css(mixC(p.land1, [30, 30, 36], 0.4));
+    c.fillStyle = dark;
+    c.fillRect(bx - 7 * s, gy - 2.2 * s, 14 * s, 2.2 * s);
+    c.strokeStyle = dark;
+    c.lineWidth = Math.max(0.7, 0.6 * s);
+    c.beginPath();
+    c.moveTo(bx - 6.5 * s, gy - 5 * s);
+    c.lineTo(bx + 6.5 * s, gy - 5 * s);
+    for (let i = -6; i <= 6; i += 2) {
+      c.moveTo(bx + i * s, gy - 2.2 * s);
+      c.lineTo(bx + i * s, gy - 5 * s);
+    }
+    c.stroke();
+    // фонарное помещение (стекло — вживую) и купол
+    c.fillStyle = dark;
+    c.fillRect(bx - 3.8 * s, gy - 9.2 * s, 7.6 * s, 7 * s);
+    c.fillStyle = css(night ? mixC([140, 50, 45], p.land1, 0.5) : mixC([170, 60, 45], p.land1, 0.12));
+    c.beginPath();
+    c.moveTo(bx - 4.8 * s, gy - 9.2 * s);
+    c.quadraticCurveTo(bx, gy - 15.5 * s, bx + 4.8 * s, gy - 9.2 * s);
+    c.fill();
+    c.fillRect(bx - 0.4 * s, gy - 17 * s, 0.8 * s, 3 * s);
+    return cv;
+  }
+
+  private bakeCloud(cl: Cloud, p: Pal, night: boolean) {
+    const { s, horizon } = this.L;
+    const w = cl.w * 130 * s;
+    const cw = w * 3.1;
+    const ch = w * 1.35;
+    const [cv, c] = mk(cw, ch, this.dpr);
+    c.translate(cw / 2, ch / 2);
+    const cy = cl.y * horizon;
+    const col = mixC(p.cloud, p.glow, 0.25 + 0.25 * (cy / horizon));
+    const a = cl.a * (night ? 0.6 : 0.82);
+    for (const [dx, dy, r] of cl.puffs) {
+      const x = dx * w;
+      const y = dy * w;
+      const rr = r * w;
+      const g = c.createRadialGradient(x, y + rr * 0.25, 0, x, y, rr);
+      g.addColorStop(0, css(mixC(col, [255, 255, 255], 0.12), a));
+      g.addColorStop(1, css(col, 0));
+      c.fillStyle = g;
+      c.beginPath();
+      c.ellipse(x, y, rr, rr * 0.55, 0, 0, Math.PI * 2);
+      c.fill();
+    }
+    // кромка, подсвеченная сверху-справа
+    const rim = night ? mixC([215, 222, 248], p.glow, 0.1) : p.glow;
+    c.globalCompositeOperation = 'lighter';
+    for (const [dx, dy, r] of cl.puffs) {
+      const rr = r * w;
+      const x = dx * w + rr * 0.25;
+      const y = dy * w - rr * 0.22;
+      const g = c.createRadialGradient(x, y, 0, x, y, rr * 0.6);
+      g.addColorStop(0, css(rim, a * (night ? 0.22 : 0.3)));
+      g.addColorStop(1, css(rim, 0));
+      c.fillStyle = g;
+      c.beginPath();
+      c.ellipse(x, y, rr * 0.6, rr * 0.3, 0, 0, Math.PI * 2);
+      c.fill();
+    }
+    return cv;
+  }
+
+  private bakeOverlay() {
+    const pad = 16;
+    const w = Math.ceil(this.W) + pad;
+    const h = Math.ceil(this.H) + pad;
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const c = cv.getContext('2d')!;
+    const vg = c.createRadialGradient(w * 0.45, h * 0.45, Math.min(w, h) * 0.3, w * 0.5, h * 0.5, Math.max(w, h) * 0.8);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+    c.fillStyle = vg;
+    c.fillRect(0, 0, w, h);
+    if (this.q > 0) {
+      // зерно плёнки — вшито в виньетку один раз (раньше: overlay-смешивание на весь экран каждый кадр)
+      const img = c.getImageData(0, 0, w, h);
+      const d = img.data;
+      for (let i = 3; i < d.length; i += 4) d[i] = clamp(d[i] + (Math.random() - 0.35) * 26, 0, 255);
+      c.putImageData(img, 0, 0);
+    }
+    return cv;
+  }
+
+  /* ────────────────────────── обновление ────────────────────────── */
+
+  update(dtRaw: number) {
+    const dt = this.reduced ? 0 : Math.min(dtRaw, 0.05);
+    this.t += dt;
+    const { s, bobberX, hookY, surface, boatX } = this.L;
+    const W = this.W;
+    const H = this.H;
+
+    this.k += (this.kTarget - this.k) * Math.min(1, (this.reduced ? 1 : dtRaw) * 1.5);
+    this.pxs += (this.px - this.pxs) * Math.min(1, dt * 2.5);
+    this.shake *= Math.pow(0.02, dt);
+    this.flash *= Math.pow(0.05, dt);
+
+    if (this.phase === 'intro') {
+      this.introT += dt * this.introSpeed;
+      const p = clamp(this.introT / this.introDur, 0, 1);
+      this.cam = H * 1.12 * (1 - easeInOut(p));
+      if (p > 0.74 && !this.introFired) {
+        this.introFired = true;
+        this.cb.onIntroDone();
+      }
+      if (p >= 1) this.phase = 'idle';
+      const rate = 20 * dt * this.introSpeed;
+      const n = Math.floor(rate) + (this.rnd() < rate % 1 ? 1 : 0);
+      for (let i = 0; i < n; i++) {
+        const bx = this.rnd() * W;
+        this.spawnBubble(bx, this.cam + H + 20, 0.8 + this.rnd() * 1.4);
+        if (this.rnd() < 0.1) this.sfx?.bubbles(this.pan(bx), 1);
+      }
+    } else if (this.phase === 'dive') {
+      this.diveT += dt;
+      const p = clamp(this.diveT / 2.8, 0, 1);
+      this.cam = H * 1.15 * easeIn(p);
+      if (this.rnd() < dt * 24) this.spawnBubble(this.rnd() * W, this.cam + H * 0.2 + this.rnd() * H * 0.6, 1.2);
+      if (p >= 1 && !this.diveFired) {
+        this.diveFired = true;
+        this.cb.onDiveDone();
+      }
+    } else {
+      this.cam = 0;
+    }
+
+    this.ripples = this.ripples.filter((r) => this.t - r.t0 < 4.5);
+    for (let i = 0; i < this.surf.length; i++) this.surf[i] = this.wave(i * this.step);
+
+    const slope = (this.sAt(boatX + 44 * s) - this.sAt(boatX - 44 * s)) / (88 * s);
+    this.boatAng += (Math.atan(slope) * 0.85 - this.boatAng) * Math.min(1, dt * 4);
+    this.boatDipV += (-this.boatDip * 60 - this.boatDipV * 6) * dt;
+    this.boatDip += this.boatDipV * dt;
+
+    this.updateFish(dt);
+
+    this.sfx?.depth(clamp((this.cam - H * 0.1) / (H * 0.35), 0, 1));
+    this.sfx?.tension(this.tension);
+
+    // светящийся след за рыбой ночью
+    const f = this.fish;
+    if (this.k < 0.6 && f.state !== 'air' && f.state !== 'caught' && f.alpha > 0.3) {
+      const sp = Math.hypot(f.vx, f.vy);
+      if (this.rnd() < dt * (2.5 + sp / (7 * s)))
+        this.bio.push({
+          x: f.x - f.dir * 26 * s + (this.rnd() - 0.5) * 10 * s,
+          y: f.y + (this.rnd() - 0.5) * 12 * s,
+          life: 0,
+          max: 0.8 + this.rnd() * 1.2,
+          r: (0.8 + this.rnd() * 1.6) * s,
+        });
+    }
+    for (const b of this.bio) {
+      b.life += dt;
+      b.y -= 6 * s * dt;
+    }
+    this.bio = this.bio.filter((b) => b.life < b.max);
+    const bioCap = this.q === 2 ? 150 : 70;
+    if (this.bio.length > bioCap) this.bio.splice(0, this.bio.length - bioCap);
+
+    this.dipV += ((this.dipTarget - this.dip) * 140 - this.dipV * 9) * dt;
+    this.dip += this.dipV * dt;
+    this.bend += (this.bendTarget - this.bend) * Math.min(1, dt * 6);
+
+    for (const b of this.bubbles) {
+      b.y += b.vy * dt;
+      b.x += Math.sin(this.t * 3 + b.ph) * 14 * s * dt;
+    }
+    this.bubbles = this.bubbles.filter((b) => {
+      if (b.y < this.sAt(b.x)) {
+        if (b.r > 2.5 * s && this.rnd() < 0.3) {
+          this.ripple(b.x, 1.6 * s);
+          this.sfx?.bubbles(this.pan(b.x), 1);
+        }
+        return false;
+      }
+      return true;
+    });
+    if (this.phase === 'idle' && this.rnd() < dt * 1.2) this.spawnBubble(bobberX + (this.rnd() - 0.5) * 30 * s, hookY + 10 * s, 0.6);
+
+    const g = 1100 * s;
+    for (const d of this.drops) {
+      d.vy += g * dt;
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
+      d.life += dt;
+    }
+    this.drops = this.drops.filter((d) => {
+      const hit = d.vy > 0 && d.y > this.sAt(d.x) + 2;
+      if (hit && this.rnd() < 0.12) this.sfx?.plip(this.pan(d.x), 0.6);
+      return !hit && d.life < 3;
+    });
+
+    for (const sp of this.sparks) {
+      sp.life += dt;
+      sp.vx *= Math.pow(0.15, dt);
+      sp.vy *= Math.pow(0.15, dt);
+      sp.vy -= 8 * s * dt;
+      sp.x += sp.vx * dt;
+      sp.y += sp.vy * dt;
+    }
+    this.sparks = this.sparks.filter((sp) => sp.life < sp.max);
+
+    const decay = Math.pow(0.25, dt);
+    for (const sc of this.schools)
+      for (const fs of sc.fish) {
+        fs.sx *= decay;
+        fs.sy *= decay;
+      }
+
+    this.nextJump -= dt;
+    if (this.nextJump < 0 && this.phase === 'idle') {
+      this.nextJump = 3 + this.rnd() * 5;
+      const p = 0.2 + this.rnd() * 0.7;
+      const jx = this.L.lightX + 140 * s + this.rnd() * Math.max(100, (this.L.mobile ? W : this.L.vis) - this.L.lightX - 160 * s);
+      this.jumpers.push({ x: jx, y: this.L.horizon + (surface - this.L.horizon) * p * p, t0: this.t, size: (3 + p * 12) * s, dir: this.rnd() < 0.5 ? -1 : 1 });
+      this.sfx?.jump(this.pan(jx), 0.62);
+    }
+    this.jumpers = this.jumpers.filter((j) => this.t - j.t0 < 2.2);
+
+    this.nextShoot -= dt;
+    if (this.nextShoot < 0) {
+      this.nextShoot = 4 + this.rnd() * 6;
+      if (this.k < 0.6)
+        this.shooting = {
+          x: this.rnd() * (this.L.mobile ? W : this.L.vis) * 0.9,
+          y: this.rnd() * this.L.horizon * 0.4,
+          t0: this.t,
+          vx: (380 + this.rnd() * 200) * (this.rnd() < 0.5 ? -1 : 1),
+          vy: 120 + this.rnd() * 80,
+        };
+    }
+  }
+
+  private updateFish(dt: number) {
+    const f = this.fish;
+    const { s, bobberX, hookY, surface, boatX } = this.L;
+    f.st += dt;
+    const hookX = bobberX + Math.sin(this.t * 0.7) * 6 * s;
+    const hy = hookY + this.dip * 0.6;
+    const len = 64 * s;
+    let tx = f.x;
+    let ty = f.y;
+    let agility = 1.6;
+    this.dipTarget = 0;
+    this.bendTarget = 0.12;
+    this.tension = 0;
+
+    switch (f.state) {
+      case 'roam': {
+        f.ph += dt * 0.32;
+        const R = (this.L.mobile ? 110 : 170) * s;
+        tx = hookX + Math.cos(f.ph) * R;
+        ty = hy + 34 * s + Math.sin(f.ph * 2) * 34 * s;
+        agility = 1.1;
+        f.alpha = Math.min(1, f.alpha + dt * 0.8);
+        break;
+      }
+      case 'approach': {
+        const side = f.x < hookX ? -1 : 1;
+        tx = hookX + side * len * 0.5;
+        ty = hy + 4 * s;
+        agility = 3.4;
+        if (!f.kicked && Math.hypot(f.x - tx, f.y - ty) < 10 * s) {
+          f.kicked = true;
+          this.dipV += 160 * s;
+          this.ripple(bobberX, 3 * s);
+          this.spawnBubble(hookX, hy, 0.7);
+          this.sfx?.plip(this.pan(bobberX), 1);
+        }
+        if (f.st > 1.1 || (f.kicked && f.st > 0.5)) {
+          f.state = 'retreat';
+          f.st = 0;
+        }
+        break;
+      }
+      case 'retreat': {
+        const side = f.x < hookX ? -1 : 1;
+        tx = hookX + side * 120 * s;
+        ty = hy + 50 * s;
+        agility = 2;
+        if (f.st > 0.9) {
+          f.state = 'roam';
+          f.ph = Math.atan2((f.y - hy) / 34, (f.x - hookX) / 170);
+        }
+        break;
+      }
+      case 'hooked': {
+        const side = f.x < hookX ? -1 : 1;
+        tx = hookX + side * len * 0.45 + Math.sin(this.t * 7) * 6 * s;
+        ty = hy + 6 * s + Math.sin(this.t * 5.3) * 5 * s;
+        agility = 4;
+        if (Math.hypot(f.x - tx, f.y - ty) < 30 * s) {
+          this.dipTarget = (Math.sin(this.t * 9) > 0.2 ? 14 : 5) * s;
+          this.bendTarget = 0.55 + Math.sin(this.t * 9) * 0.12;
+          this.tension = 0.8;
+          if (this.rnd() < dt * 4) {
+            this.ripple(bobberX, 2.5 * s);
+            this.sfx?.plip(this.pan(bobberX), 0.8);
+          }
+        }
+        break;
+      }
+      case 'reel': {
+        tx = bobberX;
+        ty = surface - 4 * s;
+        agility = 5;
+        this.bendTarget = 1.05;
+        this.tension = 1;
+        this.dipTarget = 18 * s;
+        if (f.y < this.sAt(f.x) + 12 * s || f.st > 1.6) {
+          const { by } = this.boatPose();
+          const T = 0.95;
+          const g = 1100 * s;
+          f.vx = (boatX + 6 * s - f.x) / T;
+          f.vy = (by - 40 * s - f.y - 0.5 * g * T * T) / T;
+          f.T = T;
+          f.state = 'air';
+          f.st = 0;
+          this.splash(f.x, this.sAt(f.x), 12, 1.1);
+          this.ripple(f.x, 14 * s);
+          this.shake = 5;
+          this.dipV = -420 * s;
+        }
+        break;
+      }
+      case 'air': {
+        f.vy += 1100 * s * dt;
+        f.x += f.vx * dt;
+        f.y += f.vy * dt;
+        f.spin = Math.atan2(f.vy, f.vx) + Math.sin(this.t * 22) * 0.35;
+        f.tail = Math.sin(this.t * 30);
+        this.bendTarget = 0.7;
+        this.tension = 1;
+        if (this.rnd() < dt * 10) this.drops.push({ x: f.x, y: f.y, vx: (this.rnd() - 0.5) * 60 * s, vy: 0, life: 0, r: 1.2 * s });
+        if (f.st >= f.T) {
+          f.state = 'caught';
+          f.st = 0;
+          f.caughtAt = this.t;
+          this.boatDipV = 160 * s;
+          this.flash = 1;
+          const [lx, ly] = this.toWorld(10, -14);
+          this.sparkle(lx, ly, 9);
+          this.catchRingT = this.t;
+          this.sfx?.landed();
+        }
+        return;
+      }
+      case 'caught': {
+        this.bendTarget = 0.05;
+        if (f.st > 1.1 && this.phase === 'idle' && !this.reduced) {
+          this.phase = 'dive';
+          this.diveT = 0;
+        }
+        return;
+      }
+      case 'flee': {
+        f.vx += f.dir * 300 * s * dt;
+        f.vy += 40 * s * dt;
+        f.x += f.vx * dt;
+        f.y += f.vy * dt;
+        f.tilt = clamp(Math.atan2(f.vy, Math.abs(f.vx)), -0.6, 0.6);
+        f.tail = Math.sin(this.t * 34);
+        if (f.st > 0.8) f.alpha = Math.max(0, f.alpha - dt * 1.5);
+        if (f.st > 2.4) {
+          f.state = 'roam';
+          f.st = 0;
+          f.alpha = 0;
+          f.x = f.dir > 0 ? -80 * s : this.W + 80 * s;
+          f.y = hy + 60 * s;
+          f.vx = 0;
+          f.vy = 0;
+          f.ph = f.dir > 0 ? Math.PI : 0;
+        }
+        return;
+      }
+    }
+
+    const ax = (tx - f.x) * agility * agility - f.vx * agility * 1.6;
+    const ay = (ty - f.y) * agility * agility - f.vy * agility * 1.6;
+    f.vx += ax * dt;
+    f.vy += ay * dt;
+    f.x += f.vx * dt;
+    f.y += f.vy * dt;
+    if (Math.abs(f.vx) > 8 * s) f.dir = f.vx > 0 ? 1 : -1;
+    if (f.state === 'hooked' || f.state === 'approach') f.dir = hookX > f.x ? 1 : -1;
+    const tilt = clamp(Math.atan2(f.vy, Math.abs(f.vx) + 20 * s), -0.5, 0.5);
+    f.tilt += (tilt - f.tilt) * Math.min(1, dt * 5);
+    f.tail = Math.sin(this.t * (5 + Math.hypot(f.vx, f.vy) / (12 * s)));
+  }
+
+  /* ────────────────────────── отрисовка ────────────────────────── */
+
+  render() {
+    const c = this.c;
+    const { W, H, dpr } = this;
+    const p = palAt(this.k);
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = 'source-over';
+    c.fillStyle = '#03080e';
+    c.fillRect(0, 0, W, H);
+    const shx = (this.rnd() - 0.5) * this.shake;
+    const shy = (this.rnd() - 0.5) * this.shake;
+    c.save();
+    c.translate(shx, shy - this.cam);
+    const { horizon, surface, s } = this.L;
+    if (this.cam < horizon + 20) this.drawSky(p);
+    if (this.cam < surface + 60 * s) this.drawHorizon(p);
+    this.drawWater(p);
+    if (this.cam < surface + 120 * s) {
+      this.drawSurface(p);
+      this.drawBoatLayer(p);
+    }
+    c.restore();
+    this.drawScreen();
+  }
+
+  private drawSky(p: Pal) {
+    const c = this.c;
+    const { W, k, t, q } = this;
+    const { s, horizon, sunX, mobile, vis } = this.L;
+    const visW = mobile ? W : vis;
+    const b = this.skyBox;
+    if (this.skyN && k < 0.998) c.drawImage(this.skyN, b.x, b.y, b.w, b.h);
+    if (this.skyD && k > 0.002) {
+      c.globalAlpha = k;
+      c.drawImage(this.skyD, b.x, b.y, b.w, b.h);
+      c.globalAlpha = 1;
+    }
+    const night = clamp(1 - k * 1.25, 0, 1);
+    const spr = sprites();
+    c.globalCompositeOperation = 'lighter';
+
+    // северное сияние
+    if (night > 0.01) {
+      const colW = q === 2 ? 4 : q === 1 ? 6 : 9;
+      const L0 = -10;
+      const R0 = visW * 0.96;
+      const span = Math.max(600, W);
+      for (let x = L0; x < R0; x += colW) {
+        const u = x / span;
+        const base = horizon * (0.5 + 0.1 * Math.sin(u * 4.3 + t * 0.09) + 0.05 * Math.sin(u * 11.1 - t * 0.21));
+        const hgt = horizon * (0.22 + 0.1 * Math.sin(u * 6.7 + t * 0.14 + 1.3));
+        const fold = 0.5 + 0.5 * Math.sin(u * 27 + t * 0.5 + 2 * Math.sin(u * 7 + t * 0.25));
+        const edge = clamp(Math.sin((Math.PI * (x - L0)) / (R0 - L0)) * 1.8, 0, 1);
+        c.globalAlpha = night * 0.42 * (0.18 + 0.82 * fold) * edge;
+        c.drawImage(spr.aurora, x, base - hgt, colW + 0.6, hgt);
+      }
+    }
+
+    // мерцающие звёзды
+    if (night > 0.01) {
+      const ox = this.pxs * -4;
+      c.fillStyle = '#fff8ea';
+      for (const st of this.stars) {
+        const tw = 0.55 + 0.45 * Math.sin(t * (1.2 + st.ph * 0.2) + st.ph * 7);
+        c.globalAlpha = night * tw * (0.4 + st.r * 0.35) * (1 - st.y * 0.6);
+        const r = st.r * 1.4;
+        c.fillRect(st.x * W + ox - r / 2, st.y * horizon * 0.95 - r / 2, r, r);
+      }
+      for (let i = 0; i < 6; i++) {
+        const st = this.stars[i * 7];
+        const tw = Math.pow(0.5 + 0.5 * Math.sin(t * 1.4 + st.ph * 5), 3);
+        this.glow(st.x * W + ox, st.y * horizon * 0.95, 7 * s, [230, 235, 255], night * tw * 0.5);
+      }
+      if (this.shooting) {
+        const sh = this.shooting;
+        const age = t - sh.t0;
+        if (age < 1.1) {
+          const x = sh.x + sh.vx * age;
+          const y = sh.y + sh.vy * age;
+          c.globalAlpha = Math.sin((age / 1.1) * Math.PI) * night;
+          const gr = c.createLinearGradient(x, y, x - sh.vx * 0.18, y - sh.vy * 0.18);
+          gr.addColorStop(0, 'rgba(255,250,235,1)');
+          gr.addColorStop(1, 'rgba(255,250,235,0)');
+          c.strokeStyle = gr;
+          c.lineWidth = 1.4;
+          c.beginPath();
+          c.moveTo(x, y);
+          c.lineTo(x - sh.vx * 0.18, y - sh.vy * 0.18);
+          c.stroke();
+        }
+      }
+    }
+
+    // луна
+    const moonA = clamp(1 - k * 1.3, 0, 1);
+    const moonR = 20 * s;
+    const moonX = sunX - 30 * s * k;
+    const moonY = horizon * 0.34 + k * horizon * 0.8;
+    if (moonA > 0.01) {
+      this.glow(moonX, moonY, moonR * 9, [190, 200, 240], 0.32 * moonA);
+      this.glow(moonX, moonY, moonR * 2.6, [240, 238, 220], 0.45 * moonA);
+    }
+    // солнце
+    const sunR = 30 * s;
+    const sunY = horizon + sunR * 1.4 - k * sunR * 2.5;
+    if (k > 0.01) {
+      this.glow(sunX, sunY, sunR * 9, [255, 196, 135], 0.6 * k);
+      // сумеречные лучи
+      const nr = q === 0 ? 4 : 7;
+      for (let i = 0; i < nr; i++) {
+        const a = -Math.PI / 2 + (i - (nr - 1) / 2) * (2.1 / nr) + Math.sin(t * 0.07 + i) * 0.05;
+        const len = this.H * 0.9;
+        const wid = (60 + (i % 3) * 40) * s;
+        c.save();
+        c.translate(sunX, sunY);
+        c.rotate(a);
+        c.globalAlpha = 0.2 * k * (0.5 + 0.5 * Math.sin(t * 0.25 + i * 1.9));
+        c.drawImage(spr.beam, 0, -wid / 2, len, wid);
+        c.restore();
+      }
+    }
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = 'source-over';
+    if (moonA > 0.01) {
+      c.fillStyle = `rgba(242,238,222,${moonA})`;
+      c.beginPath();
+      c.arc(moonX, moonY, moonR, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = `rgba(170,166,150,${0.32 * moonA})`;
+      for (const [dx, dy, r] of [
+        [-0.3, -0.2, 0.22],
+        [0.25, 0.15, 0.16],
+        [-0.05, 0.42, 0.12],
+        [0.38, -0.35, 0.09],
+      ]) {
+        c.beginPath();
+        c.arc(moonX + dx * moonR, moonY + dy * moonR, r * moonR, 0, Math.PI * 2);
+        c.fill();
+      }
+      c.fillStyle = `rgba(20,24,50,${0.18 * moonA})`;
+      c.beginPath();
+      c.arc(moonX - moonR * 0.35, moonY, moonR * 0.95, Math.PI * 0.5, Math.PI * 1.5);
+      c.arc(moonX - moonR * 0.1, moonY, moonR * 0.95, Math.PI * 1.5, Math.PI * 0.5, true);
+      c.fill();
+    }
+    if (k > 0.01) {
+      const sd = c.createLinearGradient(0, sunY - sunR, 0, sunY + sunR);
+      sd.addColorStop(0, `rgba(255,248,222,${k})`);
+      sd.addColorStop(1, `rgba(255,168,98,${k})`);
+      c.fillStyle = sd;
+      c.beginPath();
+      c.arc(sunX, sunY, sunR, 0, Math.PI * 2);
+      c.fill();
+    }
+
+    // облака (запечённые спрайты, ночь ↔ рассвет)
+    for (let i = 0; i < this.clouds.length; i++) {
+      const cl = this.clouds[i];
+      const spN = this.cloudN[i];
+      const spD = this.cloudD[i];
+      if (!spN || !spD) continue;
+      const cw = spN.width / this.dpr;
+      const ch = spN.height / this.dpr;
+      const span = W + cw;
+      const cx = ((cl.x * span + t * cl.sp * s) % span) - cw / 2 + this.pxs * -8;
+      const cy = cl.y * horizon;
+      if (k < 0.995) {
+        c.globalAlpha = 1 - k;
+        c.drawImage(spN, cx - cw / 2, cy - ch / 2, cw, ch);
+      }
+      if (k > 0.005) {
+        c.globalAlpha = k;
+        c.drawImage(spD, cx - cw / 2, cy - ch / 2, cw, ch);
+      }
+    }
+    c.globalAlpha = 1;
+
+    // чайки
+    c.strokeStyle = css(mixC(p.land1, [20, 20, 28], 0.5), 0.25 + k * 0.6);
+    c.lineCap = 'round';
+    c.lineWidth = 1.4 * s;
+    c.beginPath();
+    for (const gu of this.gulls) {
+      const span = W + 200;
+      const x = ((gu.x * span + t * gu.sp * s) % span) - 100;
+      const y = gu.y * horizon + Math.sin(t * 0.8 + gu.ph) * 10 * s;
+      const fl = Math.sin(t * 7 + gu.ph) * 4 * s * gu.sz;
+      const w = 9 * s * gu.sz;
+      c.moveTo(x - w, y - fl * 0.4);
+      c.quadraticCurveTo(x - w * 0.5, y - 4 * s * gu.sz - fl, x, y);
+      c.quadraticCurveTo(x + w * 0.5, y - 4 * s * gu.sz - fl, x + w, y - fl * 0.4);
+    }
+    c.stroke();
+  }
+
+  private drawHorizon(p: Pal) {
+    const c = this.c;
+    const { W, k, t, q } = this;
+    const { s, horizon, surface, sunX, mobile, vis } = this.L;
+    const visW = mobile ? W : vis;
+    const band = surface - horizon;
+    const spr = sprites();
+
+    // дальние горы (параллакс)
+    const fp = this.pxs * -6;
+    const fb = this.farBox;
+    if (this.farN) c.drawImage(this.farN, fb.x + fp, fb.y, fb.w, fb.h);
+    if (this.farD && k > 0.002) {
+      c.globalAlpha = k;
+      c.drawImage(this.farD, fb.x + fp, fb.y, fb.w, fb.h);
+      c.globalAlpha = 1;
+    }
+
+    // дальнее море
+    const sea = c.createLinearGradient(0, horizon, 0, surface + 30 * s);
+    sea.addColorStop(0, css(mixC(p.skyHor, p.seaFar, 0.55)));
+    sea.addColorStop(0.25, css(p.seaFar));
+    sea.addColorStop(1, css(p.seaNear));
+    c.fillStyle = sea;
+    c.fillRect(-20, horizon, W + 40, band + 60 * s);
+    c.fillStyle = css(p.glow, 0.25 + 0.3 * k);
+    c.fillRect(-20, horizon - 0.5, W + 40, 1.2);
+
+    // лунная / солнечная дорожка
+    c.globalCompositeOperation = 'lighter';
+    const pathCol: RGB = mixC([220, 225, 245], [255, 214, 150], k);
+    const colG = c.createLinearGradient(0, horizon, 0, surface);
+    colG.addColorStop(0, css(pathCol, 0.3));
+    colG.addColorStop(1, css(pathCol, 0.04));
+    c.fillStyle = colG;
+    c.beginPath();
+    c.moveTo(sunX - 14 * s, horizon);
+    c.lineTo(sunX + 14 * s, horizon);
+    c.lineTo(sunX + 110 * s, surface + 20 * s);
+    c.lineTo(sunX - 110 * s, surface + 20 * s);
+    c.fill();
+    const rows = q === 2 ? 30 : q === 1 ? 22 : 14;
+    c.fillStyle = css(pathCol);
+    for (let j = 0; j < rows; j++) {
+      const pj = j / rows;
+      const y = horizon + band * pj * pj + 1;
+      const wpath = (10 + pj * 120) * s;
+      const hh = Math.max(0.8, pj * 1.6 * s);
+      for (let i = 0; i < 4; i++) {
+        const n = Math.sin(j * 12.9898 + i * 78.233 + t * (0.5 + i * 0.17)) * 0.5 + 0.5;
+        const tw = Math.max(0, Math.sin(t * (2 + i) + j * 1.7 + i * 2.1));
+        const len = (2 + pj * 22) * s;
+        c.globalAlpha = (0.15 + 0.7 * tw) * (0.55 + 0.45 * k);
+        c.fillRect(sunX + (n - 0.5) * wpath * 2 - len / 2, y, len, hh);
+      }
+    }
+    if (q > 0) {
+      c.fillStyle = css(mixC(p.skyMid, [255, 255, 255], 0.3));
+      for (let j = 0; j < rows; j += 2) {
+        const pj = j / rows;
+        const y = horizon + band * pj * pj + 1;
+        c.globalAlpha = 0.05 + 0.05 * pj;
+        for (let i = 0; i < 4; i++) {
+          const x = (((Math.sin(j * 3.1 + i * 9.7) * 0.5 + 0.5) * (W + 200) + t * (6 + pj * 14) * s) % (W + 200)) - 100;
+          c.fillRect(x, y, (6 + pj * 40) * s, Math.max(0.6, pj * 1.2 * s));
+        }
+      }
+    }
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = 'source-over';
+
+    // суда на горизонте
+    const shipA = clamp(1 - k * 1.2, 0, 1);
+    for (const sh of this.ships) {
+      const span = visW + 200;
+      const x = ((((sh.x * span + t * sh.sp * s) % span) + span) % span) - 100;
+      const z = sh.sz * s;
+      const bob = Math.sin(t * 0.8 + sh.ph) * 0.4 * z;
+      const dir = sh.sp > 0 ? 1 : -1;
+      c.fillStyle = css(mixC(p.land1, p.skyHor, 0.2));
+      c.beginPath();
+      c.moveTo(x - 22 * z * dir, horizon - 3 * z + bob);
+      c.lineTo(x + 25 * z * dir, horizon - 3.4 * z + bob);
+      c.lineTo(x + 19 * z * dir, horizon + 0.5 + bob);
+      c.lineTo(x - 19 * z * dir, horizon + 0.5 + bob);
+      c.fill();
+      c.fillRect(x - 12 * z * dir - (dir < 0 ? 14 * z : 0), horizon - 7 * z + bob, 14 * z, 4 * z);
+      c.fillRect(x - 9 * z * dir - (dir < 0 ? 6 * z : 0), horizon - 10 * z + bob, 6 * z, 3 * z);
+      c.fillRect(x + 4 * z * dir, horizon - 15 * z + bob, 0.9 * z + 0.3, 12 * z);
+      if (shipA > 0.01) {
+        c.globalCompositeOperation = 'lighter';
+        const blink = Math.sin(t * 2.2 + sh.ph) > 0.5 ? 1 : 0.3;
+        const lights: [number, number, RGB, number][] = [
+          [x + 4.4 * z * dir, horizon - 15 * z, [255, 250, 235], blink],
+          [x - 20 * z * dir, horizon - 3.6 * z, dir > 0 ? [255, 90, 80] : [120, 255, 160], 0.85],
+          [x + 22 * z * dir, horizon - 3.8 * z, dir > 0 ? [120, 255, 160] : [255, 90, 80], 0.85],
+          [x - 8 * z * dir, horizon - 5.5 * z, [255, 210, 140], 0.7],
+          [x - 3 * z * dir, horizon - 5.5 * z, [255, 210, 140], 0.6],
+        ];
+        for (const [lx, ly, col, a] of lights) {
+          this.glow(lx, ly + bob, 6 * z + 2, col, shipA * a * 0.7);
+          c.globalAlpha = shipA * a;
+          c.fillStyle = css(col);
+          c.fillRect(lx - 0.7, ly - 0.7 + bob, 1.4, 1.4);
+          c.globalAlpha = shipA * a * 0.3;
+          for (let j = 0; j < 4; j++) c.fillRect(lx - 0.6 + Math.sin(t * 3 + j) * 0.9, horizon + 2 + j * 2.4 * z, 1.2, 1.1);
+        }
+        c.globalAlpha = 1;
+        c.globalCompositeOperation = 'source-over';
+      }
+    }
+
+    // мыс с маяком (параллакс сильнее, чем у гор)
+    const cp = this.pxs * -12;
+    const cb = this.capeBox;
+    if (this.capeN) c.drawImage(this.capeN, cb.x + cp, cb.y, cb.w, cb.h);
+    if (this.capeD && k > 0.002) {
+      c.globalAlpha = k;
+      c.drawImage(this.capeD, cb.x + cp, cb.y, cb.w, cb.h);
+      c.globalAlpha = 1;
+    }
+
+    // прибой у подножия скалы
+    const { lightX } = this.L;
+    c.strokeStyle = 'rgba(235,245,255,1)';
+    c.lineWidth = 1;
+    for (let i = 0; i < 7; i++) {
+      const x = lightX + cp + (104 + i * 10) * s;
+      const ph = (t * 0.6 + i * 0.37) % 1;
+      c.globalAlpha = 0.45 * (1 - ph);
+      c.beginPath();
+      c.ellipse(x, horizon + 1.5, (3 + ph * 7) * s, (0.6 + ph * 0.8) * s, 0, Math.PI, Math.PI * 2);
+      c.stroke();
+    }
+    c.globalAlpha = 1;
+
+    // фонарь маяка и луч
+    const lx = this.lamp.x + cp;
+    const ly = this.lamp.y;
+    const beamI = 1 - k * 0.7;
+    const ba = t * 0.9;
+    const bdir = Math.cos(ba);
+    const facing = Math.sin(ba);
+    const fl = Math.pow(Math.max(0, facing), 6);
+    c.globalCompositeOperation = 'lighter';
+    const blen = W * (0.08 + 0.55 * Math.abs(bdir));
+    const bw = (10 + Math.abs(facing) * 34) * s;
+    c.save();
+    c.translate(lx, ly);
+    c.scale(bdir < 0 ? -1 : 1, 1);
+    c.globalAlpha = 0.55 * beamI * Math.pow(Math.abs(bdir), 0.6);
+    c.drawImage(spr.beam, 0, -bw, blen, bw * 2);
+    c.restore();
+    // блик луча на воде
+    if (bdir > 0) {
+      const wx = lx + bdir * blen * 0.55;
+      const ww = blen * 0.35;
+      c.globalAlpha = 0.18 * beamI * bdir;
+      c.drawImage(spr.soft, wx - ww, horizon + band * 0.05 - 4 * s, ww * 2, 8 * s);
+    }
+    this.glow(lx, ly, (16 + fl * 90) * s, [255, 236, 190], (0.6 + fl * 0.4) * beamI + 0.12);
+    // окно смотрителя и огни посёлка
+    const villA = clamp(1 - k * 1.4, 0, 1);
+    if (villA > 0.01) {
+      const hw = this.houseWin;
+      const fk = 0.85 + Math.sin(t * 3.1) * 0.08 + Math.sin(t * 7.7) * 0.05;
+      this.glow(hw.x + cp, hw.y, 10 * s, [255, 190, 110], 0.55 * villA * fk);
+      for (const v of this.villagePts) {
+        const f = 0.7 + 0.3 * Math.sin(t * (1.3 + v.ph * 0.3) + v.ph * 5);
+        this.glow(v.x + cp, v.y - 1.5 * s, 7 * s, v.warm > 0.3 ? [255, 196, 120] : [205, 222, 255], 0.45 * villA * f);
+      }
+    }
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = 'source-over';
+    c.fillStyle = `rgba(255,236,190,${0.7 + beamI * 0.3})`;
+    c.fillRect(lx - 3 * s, ly - 2.9 * s, 6 * s, 5.8 * s);
+    c.fillStyle = 'rgba(40,36,40,0.7)';
+    c.fillRect(lx - 0.3 * s, ly - 2.9 * s, 0.6 * s, 5.8 * s);
+    if (villA > 0.01) {
+      const hw = this.houseWin;
+      c.fillStyle = `rgba(255,200,120,${villA})`;
+      c.fillRect(hw.x + cp - 1.3 * s, hw.y - 1.3 * s, 2.6 * s, 2.6 * s);
+      c.fillStyle = `rgba(255,214,150,${villA})`;
+      for (const v of this.villagePts) c.fillRect(v.x + cp - 0.8, v.y - 2.3 * s, 1.6, 1.6);
+    }
+
+    // дымка над водой
+    if (q > 0) {
+      c.globalCompositeOperation = 'lighter';
+      for (const m of this.mist) {
+        const span = W + 800 * s;
+        const x = ((m.x * span + t * m.sp * s) % span) - 400 * s;
+        const y = horizon + band * m.yk;
+        const w = m.w * 520 * s;
+        const h = (8 + m.yk * 26) * s;
+        c.globalAlpha = m.a * (0.05 + 0.05 * (1 - k));
+        c.drawImage(spr.soft, x - w, y - h, w * 2, h * 2);
+      }
+      c.globalAlpha = 1;
+      c.globalCompositeOperation = 'source-over';
+    }
+
+    // далёкие прыгающие рыбы
+    for (const j of this.jumpers) {
+      const age = t - j.t0;
+      if (age < 0.7) {
+        const qq = age / 0.7;
+        c.save();
+        c.translate(j.x + j.dir * qq * j.size * 3, j.y - Math.sin(qq * Math.PI) * j.size * 2.6);
+        c.rotate(j.dir * (qq - 0.5) * 2.2);
+        c.scale(j.dir, 1);
+        c.fillStyle = css(mixC(p.land1, [0, 0, 0], 0.2), 0.9);
+        this.fishPath(j.size * 2, Math.sin(t * 30));
+        c.fill();
+        c.restore();
+      }
+      if (age > 0.6) {
+        const r = (age - 0.6) * j.size * 5;
+        c.strokeStyle = `rgba(255,255,255,${0.35 * (1 - (age - 0.6) / 1.6)})`;
+        c.lineWidth = 0.8;
+        c.beginPath();
+        c.ellipse(j.x + j.dir * j.size * 3, j.y, r, r * 0.2, 0, 0, Math.PI * 2);
+        c.stroke();
+      }
+    }
+  }
+
+  private drawWater(p: Pal) {
+    const c = this.c;
+    const { W, H, k, t, q } = this;
+    const { s, surface, sunX, seabed } = this.L;
+    const camTop = this.cam;
+    const camBot = this.cam + H;
+    const spr = sprites();
+
+    // толща воды
+    const bottom = Math.min(seabed + H * 0.3, camBot + 40);
+    c.beginPath();
+    c.moveTo(-20, this.surf[0]);
+    for (let i = 0; i < this.surf.length; i++) c.lineTo(i * this.step, this.surf[i]);
+    c.lineTo(W + 20, this.surf[this.surf.length - 1]);
+    c.lineTo(W + 20, bottom);
+    c.lineTo(-20, bottom);
+    c.closePath();
+    const uw = c.createLinearGradient(0, surface - 10 * s, 0, seabed);
+    uw.addColorStop(0, css(mixC(p.seaNear, p.glow, 0.08)));
+    uw.addColorStop(0.08, css(mixC(p.seaNear, p.deep, 0.5)));
+    uw.addColorStop(0.35, css(p.deep));
+    uw.addColorStop(1, css(p.abyss));
+    c.fillStyle = uw;
+    c.fill();
+
+    // лучи света в воде (спрайты)
+    c.globalCompositeOperation = 'lighter';
+    const nR = q === 0 ? 4 : 7;
+    for (let i = 0; i < nR; i++) {
+      const x0 = ((i + 0.5) / nR) * W + Math.sin(t * 0.18 + i * 2.3) * 50 * s;
+      const sy0 = this.sAt(clamp(x0, 0, W));
+      const len = H * 1.25;
+      if (sy0 > camBot || sy0 + len < camTop) continue;
+      const w = (70 + (i % 3) * 50) * s * (0.7 + 0.3 * Math.sin(t * 0.5 + i));
+      const slant = ((x0 - sunX) / W) * 0.45 + 0.18;
+      const a = (0.06 + 0.08 * k) * (0.55 + 0.45 * Math.sin(t * 0.6 + i * 1.7));
+      c.save();
+      c.translate(x0, sy0);
+      c.transform(1, 0, slant, 1, 0, 0);
+      if (k < 0.99) {
+        c.globalAlpha = a * (1 - k);
+        c.drawImage(spr.rayCool, -w / 2, 0, w, len);
+      }
+      if (k > 0.01) {
+        c.globalAlpha = a * k;
+        c.drawImage(spr.rayWarm, -w / 2, 0, w, len);
+      }
+      c.restore();
+    }
+    // каустика под поверхностью
+    if (camTop < surface + 80 * s) {
+      const rayCol = mixC([150, 190, 230], p.glow, 0.5 + 0.3 * k);
+      c.globalAlpha = 1;
+      c.lineWidth = 1;
+      const nl = q === 0 ? 1 : 3;
+      for (let l = 0; l < nl; l++) {
+        c.strokeStyle = css(rayCol, (0.13 - l * 0.035) * (0.6 + 0.4 * k));
+        c.beginPath();
+        for (let x = 0; x <= W; x += 12) {
+          const y = this.sAt(x) + (7 + l * 9) * s + Math.sin((x * 0.05) / s + t * (1.6 + l * 0.4) + l) * 3 * s * (1 + l * 0.5);
+          if (x === 0) c.moveTo(x, y);
+          else c.lineTo(x, y);
+        }
+        c.stroke();
+      }
+      // свет фонаря лодки в воде
+      const [lx] = this.toWorld(-60, -56);
+      this.glow(lx, surface + 30 * s, 190 * s, [255, 176, 100], (1 - k) * 0.22);
+    }
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = 'source-over';
+
+    // дно и ламинарии — только когда видно
+    if (camBot > seabed - H * 0.75) {
+      c.fillStyle = css(mixC(p.abyss, [30, 30, 24], 0.3));
+      c.beginPath();
+      c.moveTo(-20, seabed + H * 0.3);
+      for (let x = -20; x <= W + 20; x += 24) c.lineTo(x, seabed + Math.sin(x * 0.01) * 18 * s + Math.sin(x * 0.033) * 8 * s);
+      c.lineTo(W + 20, seabed + H * 0.3);
+      c.fill();
+      c.lineCap = 'round';
+      for (const kp of this.kelp) {
+        const x = kp.x * W;
+        const h = kp.h * H * 0.75;
+        const segs = 12;
+        const col = css(mixC(p.kelp, p.abyss, 0.25 + (1 - kp.w) * 0.4));
+        c.strokeStyle = col;
+        c.fillStyle = col;
+        c.lineWidth = 5 * s * kp.w;
+        c.beginPath();
+        c.moveTo(x, seabed);
+        const pts: [number, number][] = [];
+        for (let i = 1; i <= segs; i++) {
+          const qq = i / segs;
+          const px = x + Math.sin(t * 0.7 + kp.ph + qq * 3) * qq * 34 * s;
+          const py = seabed - h * qq;
+          c.lineTo(px, py);
+          pts.push([px, py]);
+        }
+        c.stroke();
+        c.beginPath();
+        pts.forEach(([lx, ly], i) => {
+          if (i % 2) return;
+          const side = i % 4 ? 1 : -1;
+          c.moveTo(lx + side * 9 * s + 12 * s * kp.w, ly);
+          c.ellipse(lx + side * 9 * s, ly, 12 * s * kp.w, 3.4 * s, side * 0.5 + Math.sin(t + i) * 0.2, 0, Math.PI * 2);
+        });
+        c.fill();
+      }
+    }
+
+    // планктон (ночью светится)
+    const bioK = 1 - k;
+    c.fillStyle = css(mixC([200, 230, 255], [110, 245, 235], bioK));
+    for (const m of this.motes) {
+      const y = surface + m.y * (seabed - surface) + Math.sin(t * 0.4 + m.ph) * 10 * s;
+      if (y < camTop - 10 || y > camBot + 10) continue;
+      const x = (((m.x * W + Math.sin(t * 0.2 + m.ph) * 20 * s + this.pxs * -12 * m.z) % W) + W) % W;
+      c.globalAlpha = Math.min(1, (0.12 + 0.25 * m.z) * (0.6 + 0.4 * Math.sin(t * 2 + m.ph)) * (1 + bioK * 0.9));
+      const r = 1.4 * m.z * s + 0.4;
+      c.fillRect(x, y, r, r);
+    }
+    c.globalAlpha = 1;
+
+    // медузы
+    for (const j of this.jelly) {
+      const x = j.x * W + Math.sin(t * 0.13 + j.ph) * 40 * s;
+      const pulse = (Math.sin(t * 1.6 + j.ph) + 1) / 2;
+      const y = surface + H * j.yk + Math.sin(t * 0.2 + j.ph) * 30 * s - pulse * 4 * s;
+      if (y < camTop - 80 || y > camBot + 80) continue;
+      const r = j.r * s;
+      const bw = r * (1 + 0.18 * pulse);
+      const bh = r * (0.85 - 0.2 * pulse);
+      const ga = (1 - k) * 0.9 + 0.12;
+      const hue: RGB = j.hue > 0.5 ? [150, 205, 255] : [230, 165, 255];
+      c.globalCompositeOperation = 'lighter';
+      this.glow(x, y, r * 4, hue, 0.3 * ga);
+      c.globalAlpha = 0.22 * ga + 0.06;
+      c.strokeStyle = css(hue);
+      c.lineWidth = 0.8;
+      c.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const tx0 = x + (i - 2) * bw * 0.32;
+        c.moveTo(tx0, y);
+        for (let qq = 1; qq <= 6; qq++) c.lineTo(tx0 + Math.sin(t * 2 + j.ph + qq * 0.7 + i) * 1.3 * s * qq, y + qq * r * (0.45 + pulse * 0.06));
+      }
+      c.stroke();
+      c.globalAlpha = 0.4 * ga + 0.08;
+      c.fillStyle = css(hue);
+      c.beginPath();
+      c.ellipse(x, y, bw, bh, 0, Math.PI, 0);
+      c.quadraticCurveTo(x, y + bh * 0.35, x - bw, y);
+      c.fill();
+      c.globalAlpha = 0.5 * ga;
+      c.fillStyle = 'rgba(255,255,255,1)';
+      c.beginPath();
+      c.ellipse(x - bw * 0.3, y - bh * 0.55, bw * 0.25, bh * 0.15, -0.3, 0, Math.PI * 2);
+      c.fill();
+      c.globalAlpha = 1;
+      c.globalCompositeOperation = 'source-over';
+    }
+
+    // косяки рыб
+    for (const sc of this.schools) {
+      const cx = this.schoolX(sc);
+      const cy = this.schoolY(sc);
+      if (cy < camTop - 200 || cy > camBot + 200) continue;
+      const depthK = clamp((cy - surface) / (H * 1.3), 0, 1);
+      c.fillStyle = css(mixC(mixC([120, 150, 165], p.deep, depthK * 0.7), p.glow, 0.05));
+      c.globalAlpha = 0.85;
+      const stepN = q === 0 ? 2 : 1;
+      for (let n = 0; n < sc.fish.length; n += stepN) {
+        const f = sc.fish[n];
+        const x = cx + f.ox * s + Math.sin(t * 1.3 + f.ph) * 8 * s + f.sx;
+        const y = cy + f.oy * s + Math.sin(t * 1.9 + f.ph * 2) * 5 * s + f.sy;
+        if (x < -40 || x > W + 40) continue;
+        c.save();
+        c.translate(x, y);
+        c.scale(sc.dir, 1);
+        c.rotate(Math.sin(t * 1.9 + f.ph * 2) * 0.12);
+        this.fishPath(f.len * s, Math.sin(t * 9 + f.ph * 3));
+        c.fill();
+        c.restore();
+      }
+      c.globalAlpha = 1;
+    }
+
+    // пузыри — одним path
+    c.beginPath();
+    let any = false;
+    for (const b of this.bubbles) {
+      if (b.y < camTop - 20 || b.y > camBot + 20) continue;
+      c.moveTo(b.x + b.r, b.y);
+      c.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      any = true;
+    }
+    if (any) {
+      c.strokeStyle = 'rgba(210,240,255,0.45)';
+      c.lineWidth = 0.9;
+      c.stroke();
+      c.beginPath();
+      for (const b of this.bubbles) {
+        if (b.r < 2 * s || b.y < camTop - 20 || b.y > camBot + 20) continue;
+        c.moveTo(b.x - b.r * 0.35 + b.r * 0.28, b.y - b.r * 0.35);
+        c.arc(b.x - b.r * 0.35, b.y - b.r * 0.35, b.r * 0.28, 0, Math.PI * 2);
+      }
+      c.fillStyle = 'rgba(255,255,255,0.5)';
+      c.fill();
+    }
+
+    // биолюминесценция
+    if (this.bio.length && k < 0.95) {
+      c.globalCompositeOperation = 'lighter';
+      for (const b of this.bio) this.glow(b.x, b.y, b.r * 5, [130, 255, 235], Math.sin((b.life / b.max) * Math.PI) * (1 - k) * 0.9);
+      c.globalAlpha = 1;
+      c.globalCompositeOperation = 'source-over';
+    }
+
+    if (camTop > surface + H * 0.9) return;
+
+    // леска, грузило, крючок
+    const f = this.fish;
+    const { bobberX } = this.L;
+    const bobY = this.sAt(bobberX) + this.dip;
+    const hooked = f.state === 'hooked' || f.state === 'reel';
+    const [mx, my] = this.fishMouth();
+    const hx = hooked ? mx : bobberX + Math.sin(t * 0.7) * 6 * s;
+    const hy = hooked ? my : this.L.hookY + this.dip * 0.6;
+    if (f.state !== 'air' && f.state !== 'caught') {
+      c.strokeStyle = 'rgba(230,240,245,0.35)';
+      c.lineWidth = 0.8;
+      c.beginPath();
+      c.moveTo(bobberX, bobY + 6 * s);
+      c.quadraticCurveTo(bobberX + (hx - bobberX) * 0.3 + Math.sin(t) * 4 * s, (bobY + hy) / 2, hx, hy);
+      c.stroke();
+      c.fillStyle = '#2a2f36';
+      c.beginPath();
+      c.arc(bobberX + (hx - bobberX) * 0.62, bobY + (hy - bobY) * 0.62, 2.2 * s, 0, Math.PI * 2);
+      c.fill();
+      if (!hooked) {
+        c.strokeStyle = 'rgba(200,205,210,0.9)';
+        c.lineWidth = 1.1 * s;
+        c.beginPath();
+        c.arc(hx - 2.5 * s, hy + 3 * s, 3 * s, -0.2, Math.PI * 1.05);
+        c.stroke();
+        c.strokeStyle = '#d07a86';
+        c.lineWidth = 2.2 * s;
+        c.lineCap = 'round';
+        c.beginPath();
+        c.moveTo(hx - 1 * s, hy + 2 * s);
+        c.bezierCurveTo(hx + 5 * s, hy + 6 * s + Math.sin(t * 6) * 2 * s, hx - 4 * s, hy + 10 * s, hx + 2 * s, hy + 13 * s + Math.sin(t * 5) * 2 * s);
+        c.stroke();
+      }
+    }
+
+    // хозяин бухты
+    if (f.state !== 'air' && f.state !== 'caught' && f.alpha > 0.01) {
+      const depthK = clamp((f.y - surface) / (H * 0.6), 0, 1);
+      if (this.k < 0.6) {
+        c.globalCompositeOperation = 'lighter';
+        this.glow(f.x, f.y, 70 * s, [90, 220, 210], 0.12 * (1 - this.k) * f.alpha);
+        c.globalAlpha = 1;
+        c.globalCompositeOperation = 'source-over';
+      }
+      c.save();
+      c.translate(f.x, f.y);
+      c.scale(f.dir, 1);
+      c.rotate(f.tilt);
+      c.globalAlpha = f.alpha;
+      this.drawFish(64 * s, css(mixC(mixC([58, 92, 108], p.glow, 0.08), p.deep, depthK * 0.4)), css(mixC([196, 204, 196], p.deep, depthK * 0.45)), f.tail);
+      c.restore();
+    }
+  }
+
+  private drawSurface(p: Pal) {
+    const c = this.c;
+    const { W, t, k } = this;
+    const { s, surface, sunX } = this.L;
+
+    c.beginPath();
+    for (let i = 0; i < this.surf.length; i++) {
+      if (i === 0) c.moveTo(0, this.surf[0]);
+      else c.lineTo(i * this.step, this.surf[i]);
+    }
+    c.strokeStyle = css(mixC([255, 255, 255], p.glow, 0.3), 0.55);
+    c.lineWidth = 1.3;
+    c.stroke();
+    c.save();
+    c.translate(0, 3 * s);
+    c.strokeStyle = css(p.abyss, 0.25);
+    c.lineWidth = 3 * s;
+    c.stroke();
+    c.restore();
+
+    // пена на гребнях и блики
+    c.globalCompositeOperation = 'lighter';
+    c.fillStyle = '#ebf5ff';
+    for (let i = 0; i < 40; i++) {
+      const spd = (8 + (i % 4) * 6) * s;
+      const x = ((i * 97.13 + t * spd) % (W + 40)) - 20;
+      c.globalAlpha = 0.1 + 0.16 * Math.max(0, Math.sin(t * 1.3 + i * 2.1));
+      c.fillRect(x, this.sAt(x) - 0.5, (4 + (i % 5) * 3) * s, 1);
+    }
+    c.fillStyle = css(mixC([215, 225, 255], [255, 220, 160], k));
+    for (let i = 0; i < 22; i++) {
+      const n = Math.sin(i * 12.9898) * 43758.5453;
+      const fr = n - Math.floor(n);
+      const tw = Math.pow(Math.max(0, Math.sin(t * (2.2 + fr * 2) + i * 1.7)), 10);
+      if (tw < 0.05) continue;
+      const x = sunX + (fr - 0.5) * 340 * s;
+      const y = this.sAt(x) - 1;
+      const r = (2 + tw * 6) * s;
+      c.globalAlpha = tw * 0.9;
+      c.fillRect(x - r, y - 0.5, r * 2, 1);
+      c.fillRect(x - 0.5, y - r * 0.6, 1, r * 1.2);
+    }
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = 'source-over';
+
+    // кольца ряби — только над водой
+    if (this.ripples.length) {
+      c.save();
+      c.beginPath();
+      c.moveTo(-20, surface - 200 * s);
+      c.lineTo(W + 20, surface - 200 * s);
+      for (let i = this.surf.length - 1; i >= 0; i--) c.lineTo(i * this.step, this.surf[i]);
+      c.closePath();
+      c.clip();
+      c.strokeStyle = '#fff';
+      c.lineWidth = 1;
+      for (const r of this.ripples) {
+        const age = t - r.t0;
+        const rad = age * r.sp * 0.5 + 4 * s;
+        c.globalAlpha = Math.exp(-age * 1.3) * Math.min(1, r.amp / (6 * s)) * 0.6;
+        c.beginPath();
+        c.ellipse(r.x, surface + 2 * s, rad, rad * 0.16, 0, 0, Math.PI * 2);
+        c.stroke();
+      }
+      c.restore();
+    }
+  }
+
+  private drawBoatLayer(p: Pal) {
+    const c = this.c;
+    const { W, t, k } = this;
+    const { s, surface, bobberX, horizon, sunX } = this.L;
+    const f = this.fish;
+    const { bx, by } = this.boatPose();
+    const [tipX, tipY] = this.toWorld(...this.rodTipLocal());
+    const [mx, my] = this.fishMouth();
+    const bobY = this.sAt(bobberX) + this.dip;
+
+    if (f.state !== 'caught') {
+      const endX = f.state === 'air' ? mx : bobberX;
+      const endY = f.state === 'air' ? my : bobY - 11 * s;
+      const sag = (1 - this.tension) * 46 * s + 6 * s;
+      c.strokeStyle = 'rgba(235,235,225,0.55)';
+      c.lineWidth = 0.9;
+      c.beginPath();
+      c.moveTo(tipX, tipY);
+      c.quadraticCurveTo((tipX + endX) / 2, Math.max(tipY, endY) + sag, endX, endY);
+      c.stroke();
+    }
+
+    c.save();
+    c.translate(bx, by);
+    c.rotate(this.boatAng);
+    c.scale(s, s);
+    this.drawBoat(p);
+    c.restore();
+
+    // поплавок
+    if (f.state !== 'caught') {
+      const slope = (this.sAt(bobberX + 8) - this.sAt(bobberX - 8)) / 16;
+      c.save();
+      c.translate(bobberX, bobY);
+      c.rotate(Math.atan(slope) * 0.8 + clamp(this.dipV / (2000 * s), -0.3, 0.3));
+      c.scale(s, s);
+      c.strokeStyle = '#2b2b2b';
+      c.lineWidth = 1.2;
+      c.beginPath();
+      c.moveTo(0, -6);
+      c.lineTo(0, -14);
+      c.stroke();
+      c.fillStyle = '#ffdd88';
+      c.fillRect(-1, -16, 2, 3);
+      c.fillStyle = '#d7473b';
+      c.beginPath();
+      c.ellipse(0, -1, 4.6, 6, 0, Math.PI, 0);
+      c.fill();
+      c.fillStyle = 'rgba(240,240,232,0.75)';
+      c.beginPath();
+      c.ellipse(0, -1, 4.6, 7.5, 0, 0, Math.PI);
+      c.fill();
+      c.restore();
+    }
+
+    if (f.state === 'air') {
+      c.save();
+      c.translate(f.x, f.y);
+      c.rotate(f.spin);
+      if (Math.cos(f.spin) < 0) c.scale(1, -1);
+      this.drawFish(64 * s, css(mixC([70, 110, 125], p.glow, 0.15)), css([230, 228, 215]), f.tail);
+      c.restore();
+    }
+
+    // брызги — одним path
+    if (this.drops.length) {
+      c.beginPath();
+      for (const d of this.drops) {
+        c.moveTo(d.x + d.r, d.y);
+        c.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+      }
+      c.fillStyle = 'rgba(230,245,255,0.8)';
+      c.fill();
+    }
+
+    // передняя полупрозрачная волна
+    c.beginPath();
+    for (let i = 0; i < this.surf.length; i++) {
+      const x = i * this.step;
+      const y = this.surf[i] + 2 * s + Math.sin((x * 0.02) / s - t * 2.1) * 1.6 * s;
+      if (i === 0) c.moveTo(x, y);
+      else c.lineTo(x, y);
+    }
+    c.lineTo(W + 20, surface + 40 * s);
+    c.lineTo(-20, surface + 40 * s);
+    c.closePath();
+    const fw = c.createLinearGradient(0, surface - 10 * s, 0, surface + 34 * s);
+    fw.addColorStop(0, css(p.seaNear, 0.55));
+    fw.addColorStop(1, css(mixC(p.seaNear, p.deep, 0.5), 0));
+    c.fillStyle = fw;
+    c.fill();
+
+    c.globalCompositeOperation = 'lighter';
+    // кольцо улова — одно тонкое расходящееся кольцо вместо вспышки
+    const ra = t - this.catchRingT;
+    if (ra >= 0 && ra < 1.1) {
+      const qq = ra / 1.1;
+      const e = 1 - Math.pow(1 - qq, 3);
+      const R = (24 + e * 90) * s;
+      c.globalAlpha = (1 - qq) * 0.55;
+      c.strokeStyle = 'rgb(255,214,150)';
+      c.lineWidth = 1.2;
+      c.beginPath();
+      c.ellipse(bx + 4 * s, by - 18 * s, R, R * 0.42, 0, 0, Math.PI * 2);
+      c.stroke();
+    }
+    // золотые блики улова: мягкое пятно + тонкий крестик
+    for (const sp of this.sparks) {
+      const life = sp.life / sp.max;
+      const a = Math.sin(Math.min(1, life * 1.15) * Math.PI);
+      this.glow(sp.x, sp.y, 9 * s, [255, 205, 130], a * 0.55);
+    }
+    c.fillStyle = 'rgb(255,232,180)';
+    for (const sp of this.sparks) {
+      const life = sp.life / sp.max;
+      const a = Math.sin(Math.min(1, life * 1.15) * Math.PI);
+      const r = (1.4 + a * 2.2) * s;
+      c.globalAlpha = a;
+      c.beginPath();
+      c.moveTo(sp.x, sp.y - r * 1.6);
+      c.lineTo(sp.x + r * 0.35, sp.y);
+      c.lineTo(sp.x, sp.y + r * 1.6);
+      c.lineTo(sp.x - r * 0.35, sp.y);
+      c.closePath();
+      c.moveTo(sp.x - r * 1.6, sp.y);
+      c.lineTo(sp.x, sp.y + r * 0.35);
+      c.lineTo(sp.x + r * 1.6, sp.y);
+      c.lineTo(sp.x, sp.y - r * 0.35);
+      c.fill();
+    }
+    // фонарь лодки
+    const lanternA = (1 - k) * 0.85 + 0.15;
+    const [lnx, lny] = this.toWorld(-60, -54);
+    const flick = 0.88 + Math.sin(t * 13) * 0.05 + Math.sin(t * 7.3) * 0.07;
+    this.glow(lnx, lny, 100 * s, [255, 176, 96], 0.6 * lanternA * flick);
+    this.glow(lnx, lny, 22 * s, [255, 220, 160], 0.8 * lanternA * flick);
+    c.fillStyle = 'rgb(255,190,120)';
+    for (let i = 0; i < 5; i++) {
+      const w = (18 - i * 3) * s;
+      c.globalAlpha = 0.25 * lanternA * flick;
+      c.fillRect(lnx - w / 2 + Math.sin(t * 2 + i) * 3 * s, this.sAt(lnx) + 4 * s + i * 4 * s, w, 1.2);
+    }
+    if (this.flash > 0.01) this.glow(bx, by - 20 * s, 150 * s, [255, 226, 170], 0.3 * this.flash);
+    // блики объектива на рассвете
+    if (k > 0.3 && this.cam < this.H * 0.3) {
+      const fx = W * 0.45;
+      const fy = this.H * 0.5;
+      [0.35, 0.6, 0.85].forEach((qq, i) => {
+        this.glow(sunX + (fx - sunX) * qq * 1.6, horizon + (fy - horizon) * qq * 1.6, (16 + i * 18) * s, [255, 210, 150], 0.08 * (k - 0.3));
+      });
+    }
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = 'source-over';
+  }
+
+  private drawScreen() {
+    const c = this.c;
+    const { W, H } = this;
+    const { surface } = this.L;
+    if (this.overlay) {
+      const jx = Math.floor(this.rnd() * 16);
+      const jy = Math.floor(this.rnd() * 16);
+      c.drawImage(this.overlay, -jx, -jy, this.overlay.width, this.overlay.height);
+    }
+    if (this.cam > 4) {
+      const depth = Math.max(0, (this.cam + H * 0.5 - surface) / H) * 64;
+      const gx = this.L.mobile ? 18 : 34;
+      c.save();
+      c.globalAlpha = clamp(this.cam / (H * 0.25), 0, 1) * 0.85;
+      c.strokeStyle = 'rgba(200,164,106,0.5)';
+      c.lineWidth = 1;
+      c.beginPath();
+      c.moveTo(gx, H * 0.25);
+      c.lineTo(gx, H * 0.75);
+      const off = this.cam % 24;
+      for (let y = H * 0.25 - off + 24; y < H * 0.75; y += 24) {
+        c.moveTo(gx, y);
+        c.lineTo(gx + 6, y);
+      }
+      c.stroke();
+      c.fillStyle = '#c8a46a';
+      c.beginPath();
+      c.moveTo(gx + 2, H / 2);
+      c.lineTo(gx + 10, H / 2 - 5);
+      c.lineTo(gx + 10, H / 2 + 5);
+      c.fill();
+      c.font = '500 10px Inter, system-ui, sans-serif';
+      c.fillStyle = 'rgba(230,225,214,0.6)';
+      c.fillText(this.phase === 'dive' ? 'ПОГРУЖЕНИЕ' : 'ПОДЪЁМ', gx + 16, H / 2 - 12);
+      c.font = '600 22px "Cormorant Garamond", Georgia, serif';
+      c.fillStyle = '#e3c996';
+      c.fillText(`${depth.toFixed(1)} м`, gx + 16, H / 2 + 10);
+      c.restore();
+    }
+    let dark = 0;
+    if (this.phase === 'intro') dark = 1 - clamp(this.introT / 1.1, 0, 1);
+    if (this.phase === 'dive') dark = Math.pow(clamp(this.diveT / 2.8, 0, 1), 2.2);
+    if (this.fish.state === 'caught' && this.diveFired) dark = 1;
+    if (dark > 0.001) {
+      c.fillStyle = `rgba(3,8,14,${dark})`;
+      c.fillRect(0, 0, W, H);
+    }
+  }
+
+  private fishPath(len: number, tail: number) {
+    const c = this.c;
+    const h = len * 0.26;
+    c.beginPath();
+    c.moveTo(len * 0.5, 0);
+    c.bezierCurveTo(len * 0.38, -h * 1.05, -len * 0.1, -h * 1.1, -len * 0.33, -h * 0.2);
+    c.lineTo(-len * 0.5, -h * 0.95 + tail * h * 0.35);
+    c.quadraticCurveTo(-len * 0.43, tail * h * 0.2, -len * 0.5, h * 0.95 + tail * h * 0.35);
+    c.lineTo(-len * 0.33, h * 0.2);
+    c.bezierCurveTo(-len * 0.1, h * 1.0, len * 0.36, h * 0.95, len * 0.5, 0);
+    c.closePath();
+  }
+
+  private drawFish(len: number, top: string, belly: string, tail: number) {
+    const c = this.c;
+    const h = len * 0.26;
+    this.fishPath(len, tail);
+    const g = c.createLinearGradient(0, -h, 0, h);
+    g.addColorStop(0, top);
+    g.addColorStop(0.55, top);
+    g.addColorStop(1, belly);
+    c.fillStyle = g;
+    c.fill();
+    c.beginPath();
+    c.moveTo(len * 0.12, -h * 0.92);
+    c.quadraticCurveTo(-len * 0.02, -h * 1.75, -len * 0.18, -h * 0.7);
+    c.fillStyle = top;
+    c.fill();
+    c.fillStyle = 'rgba(240,235,220,0.9)';
+    c.beginPath();
+    c.arc(len * 0.34, -h * 0.18, Math.max(0.8, len * 0.035), 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = '#111';
+    c.beginPath();
+    c.arc(len * 0.345, -h * 0.18, len * 0.018, 0, Math.PI * 2);
+    c.fill();
+    c.strokeStyle = 'rgba(0,0,0,0.25)';
+    c.lineWidth = 1;
+    c.beginPath();
+    c.arc(len * 0.24, 0, h * 0.6, -1, 1);
+    c.stroke();
+    c.strokeStyle = 'rgba(255,255,255,0.18)';
+    c.beginPath();
+    c.moveTo(len * 0.2, -h * 0.05);
+    c.quadraticCurveTo(0, h * 0.05, -len * 0.3, 0);
+    c.stroke();
+    c.fillStyle = 'rgba(0,0,0,0.18)';
+    c.beginPath();
+    c.moveTo(len * 0.16, h * 0.3);
+    c.quadraticCurveTo(len * 0.02, h * (0.9 + tail * 0.2), -len * 0.02, h * 0.45);
+    c.fill();
+  }
+
+  private drawBoat(p: Pal) {
+    const c = this.c;
+    c.beginPath();
+    c.moveTo(-80, -16);
+    c.quadraticCurveTo(0, -9, 84, -26);
+    c.quadraticCurveTo(72, 6, 30, 15);
+    c.quadraticCurveTo(-40, 19, -73, 7);
+    c.closePath();
+    const hg = c.createLinearGradient(0, -26, 0, 18);
+    hg.addColorStop(0, css(mixC(p.boat, p.glow, 0.12)));
+    hg.addColorStop(1, css(p.boatDark));
+    c.fillStyle = hg;
+    c.fill();
+    c.strokeStyle = 'rgba(0,0,0,0.22)';
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(-77, -6);
+    c.quadraticCurveTo(0, 2, 78, -12);
+    c.moveTo(-74, 2);
+    c.quadraticCurveTo(0, 11, 70, -2);
+    c.stroke();
+    c.strokeStyle = css(mixC([210, 168, 108], p.glow, 0.2));
+    c.lineWidth = 2.6;
+    c.beginPath();
+    c.moveTo(-80, -16);
+    c.quadraticCurveTo(0, -9, 84, -26);
+    c.stroke();
+    c.fillStyle = 'rgba(230,220,200,0.35)';
+    c.font = 'bold 7px Inter, sans-serif';
+    c.fillText('ЗВ-7', 40, -6);
+
+    // фонарь на шесте
+    c.strokeStyle = css(p.boatDark);
+    c.lineWidth = 2;
+    c.beginPath();
+    c.moveTo(-68, -13);
+    c.lineTo(-68, -66);
+    c.lineTo(-60, -66);
+    c.stroke();
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(-60, -66);
+    c.lineTo(-60, -60);
+    c.stroke();
+    c.fillStyle = css(p.boatDark);
+    c.fillRect(-63.5, -60, 7, 1.6);
+    c.fillStyle = `rgba(255,${200 - this.k * 20},${120 - this.k * 20},${0.95 - this.k * 0.3})`;
+    c.fillRect(-63, -58.4, 6, 8);
+    c.fillStyle = css(p.boatDark);
+    c.fillRect(-63.5, -50.6, 7, 1.6);
+
+    // рыбак
+    const coat = css(p.coat);
+    c.fillStyle = coat;
+    c.beginPath();
+    c.moveTo(-20, -12);
+    c.lineTo(-16, -44);
+    c.quadraticCurveTo(-6, -52, 4, -45);
+    c.lineTo(8, -12);
+    c.closePath();
+    c.fill();
+    c.strokeStyle = css(p.glow, 0.35 + 0.25 * this.k);
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(4, -45);
+    c.lineTo(8, -12);
+    c.stroke();
+    // тёплый отсвет фонаря на спине
+    c.strokeStyle = `rgba(255,170,90,${0.4 * (1 - this.k)})`;
+    c.beginPath();
+    c.moveTo(-16, -44);
+    c.lineTo(-20, -12);
+    c.stroke();
+    c.fillStyle = css(mixC(p.coat, [150, 110, 90], 0.4));
+    c.beginPath();
+    c.arc(-6, -56, 7.5, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = css(mixC(p.coat, [60, 70, 60], 0.4));
+    c.beginPath();
+    c.ellipse(-6, -61, 13, 3, -0.05, 0, Math.PI * 2);
+    c.fill();
+    c.beginPath();
+    c.arc(-6, -62, 7.5, Math.PI, 0);
+    c.fill();
+    c.strokeStyle = coat;
+    c.lineWidth = 5;
+    c.lineCap = 'round';
+    c.beginPath();
+    c.moveTo(0, -40);
+    c.quadraticCurveTo(10, -32, 18, -36);
+    c.stroke();
+    // удилище
+    const ca = -0.86 + this.bend * 0.25;
+    const [tx, ty] = this.rodTipLocal();
+    c.strokeStyle = '#2c241d';
+    c.lineWidth = 2.6;
+    c.beginPath();
+    c.moveTo(8, -26);
+    c.lineTo(18, -36);
+    c.stroke();
+    c.strokeStyle = css(mixC([60, 46, 34], p.glow, 0.15));
+    c.lineWidth = 1.7;
+    c.beginPath();
+    c.moveTo(18, -36);
+    c.quadraticCurveTo(18 + Math.cos(ca) * 76, -36 + Math.sin(ca) * 76, tx, ty);
+    c.stroke();
+    c.fillStyle = '#9aa0a6';
+    c.beginPath();
+    c.arc(14, -28, 3, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = css(mixC(p.coat, [90, 100, 110], 0.5));
+    c.fillRect(30, -24, 12, 10);
+    if (this.fish.state === 'caught') {
+      c.fillStyle = css(mixC([70, 110, 125], p.glow, 0.15));
+      c.beginPath();
+      c.moveTo(34, -24);
+      c.lineTo(31, -34 + Math.sin(this.t * 12) * 1.5);
+      c.lineTo(37, -30);
+      c.fill();
+    }
+  }
+}
