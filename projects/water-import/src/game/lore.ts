@@ -102,7 +102,7 @@ export function conditionsNow(e: Engine, id: string): ConditionCheck[] {
   const res: ConditionCheck[] = [];
   res.push({ label: "Акватория", ok: f.loc.includes(e.s.location), hint: f.loc.map((l) => LOC_BY_ID[l].name).join(", ") });
   res.push({ label: "Время суток", ok: f.time === "any" || f.time === tod, hint: { any: "любое", day: "день", night: "ночь", twilight: "сумерки" }[f.time] });
-  if (f.weather) res.push({ label: "Погода", ok: f.weather.includes(e.s.weather), hint: f.weather.map((w) => WEATHER_INFO[w].name.toLowerCase()).join(", ") });
+  if (f.weather) res.push({ label: "Погода", ok: f.weather.includes(e.weather), hint: f.weather.map((w) => WEATHER_INFO[w].name.toLowerCase()).join(", ") });
   if (f.season) res.push({ label: "Сезон", ok: f.season.includes(e.season), hint: f.season.map((s) => SEASONS[s].toLowerCase()).join(", ") });
   if (f.moon) res.push({ label: "Луна", ok: f.moon === "full" ? e.moonIndex === 4 : e.moonIndex === 0, hint: f.moon === "full" ? "полнолуние" : "новолуние" });
   res.push({ label: "Длина лески", ok: e.line.value >= f.depth[0], hint: `от ${f.depth[0]} м` });
@@ -113,7 +113,7 @@ export function conditionsNow(e: Engine, id: string): ConditionCheck[] {
 export function availableNow(e: Engine, f: FishDef) {
   const tod = e.timeOfDay;
   if (f.time !== "any" && f.time !== tod) return false;
-  if (f.weather && !f.weather.includes(e.s.weather)) return false;
+  if (f.weather && !f.weather.includes(e.weather)) return false;
   if (f.season && !f.season.includes(e.season)) return false;
   if (f.moon === "full" && e.moonIndex !== 4) return false;
   if (f.moon === "new" && e.moonIndex !== 0) return false;

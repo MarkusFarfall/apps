@@ -104,7 +104,7 @@ export function drawBoat(f: Frame, x: number, pose: "fish" | "helm" | "moored" =
     ctx.moveTo(mx, deck - mh);
     ctx.lineTo(-w * 0.45, deck);
     ctx.stroke();
-    const billow = Math.sin(t * 0.9) * 3 * s + e.s.wind * 6 * s;
+    const billow = Math.sin(t * 0.9) * 3 * s + f.wind * 6 * s;
     const sail = dim(mix("#f6f4ee", "#ffd8b0", f.golden * 0.35));
     ctx.fillStyle = sail;
     ctx.beginPath();
@@ -206,7 +206,7 @@ export function drawBoat(f: Frame, x: number, pose: "fish" | "helm" | "moored" =
         ctx.fillRect(cx + cw * 0.2, deck - ch - 22 * s, 10 * s, 18 * s);
         ctx.fillStyle = dim("#b8322a");
         ctx.fillRect(cx + cw * 0.2, deck - ch - 22 * s, 10 * s, 5 * s);
-        if (Math.random() < f.dt * 6) smoke.push({ x: x + (cx + cw * 0.2 + 5 * s), y: y + deck - ch - 22 * s, t: 0, vx: 6 + e.s.wind * 30 });
+        if (Math.random() < f.dt * 6) smoke.push({ x: x + (cx + cw * 0.2 + 5 * s), y: y + deck - ch - 22 * s, t: 0, vx: 6 + f.wind * 30 });
       }
       if (tier === 3 && st === "seiner") {
         ctx.lineWidth = 2.5 * s;
@@ -227,7 +227,7 @@ export function drawBoat(f: Frame, x: number, pose: "fish" | "helm" | "moored" =
         ctx.fillRect(cx - cw * 0.35, deck - ch - 18 * s, 8 * s, 14 * s);
         ctx.fillStyle = dim("#1a1a1a");
         ctx.fillRect(cx - cw * 0.35, deck - ch - 20 * s, 8 * s, 3 * s);
-        if (Math.random() < f.dt * 6) smoke.push({ x: x + (cx - cw * 0.35 + 4 * s), y: y + deck - ch - 20 * s, t: 0, vx: 6 + e.s.wind * 30 });
+        if (Math.random() < f.dt * 6) smoke.push({ x: x + (cx - cw * 0.35 + 4 * s), y: y + deck - ch - 20 * s, t: 0, vx: 6 + f.wind * 30 });
       }
       if (night > 0.3) {
         glow(ctx, mx, mtop - 2, 2.2 * s, "#ffffff", night);
@@ -459,7 +459,7 @@ export function drawBoat(f: Frame, x: number, pose: "fish" | "helm" | "moored" =
   if (calm && Math.random() < f.dt * 1.8) {
     const ca = Math.cos(ang), sa = Math.sin(ang);
     const lx = fx + 9.5 * s, ly = fy - 47 * s;
-    smoke.push({ x: x + lx * ca - ly * sa, y: y + lx * sa + ly * ca, t: 0, vx: 4 + e.s.wind * 20 });
+    smoke.push({ x: x + lx * ca - ly * sa, y: y + lx * sa + ly * ca, t: 0, vx: 4 + f.wind * 20 });
   }
 
   if (pose !== "fish") {

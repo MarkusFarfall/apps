@@ -116,6 +116,9 @@ export function setFonts(sans: string, serif: string) {
 /** Безопасная альфа для строк rgba(): без экспоненциальной записи */
 export const af = (a: number) => (a > 0 ? (a < 1 ? a.toFixed(4) : "1") : "0");
 
+/** Convert the atmosphere module's RGB tuples to the renderer's #rrggbb colors. */
+export const rgbHex = (rgb: readonly number[]) => `#${rgb.slice(0, 3).map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("")}`;
+
 /** Защита градиентов: некорректный цвет или смещение не должны срывать кадр */
 export function installCanvasGuards() {
   const G = (globalThis as unknown as { CanvasGradient?: { prototype: CanvasGradient } }).CanvasGradient;

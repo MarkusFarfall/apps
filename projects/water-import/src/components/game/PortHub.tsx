@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { Engine, Trip } from "@/game/engine";
 import type { Building, Hotspot } from "@/game/render/port";
-import { BOATS, LOC_BY_ID, SEASONS, WEATHER_INFO, spotsOf } from "@/game/world";
+import { BOATS, LOC_BY_ID, SEASONS, spotsOf } from "@/game/world";
 import { AccountBadge, type AccountState } from "./Account";
 import { GearIcon, Icon, MiscIcon, WEATHER_ICON } from "./Icons";
 import { fmt } from "./Panels";
@@ -88,7 +88,7 @@ function DepartSheet({ engine, onClose, onTravel, onMap }: { engine: Engine; onC
   );
 }
 
-export function PortHub({ engine, hot, compact, onOpen, onTravel, onJournal, onCodex, account, onAccount }: {
+export function PortHub({ engine, hot, compact, onOpen, onTravel, onJournal, onCodex, onEvents, account, onAccount }: {
   engine: Engine;
   hot: Hotspot[];
   compact: boolean;
@@ -96,13 +96,14 @@ export function PortHub({ engine, hot, compact, onOpen, onTravel, onJournal, onC
   onTravel: (t: Trip) => void;
   onJournal: () => void;
   onCodex: () => void;
+  onEvents: () => void;
   account: AccountState;
   onAccount: () => void;
 }) {
   const s = engine.s;
   const port = engine.port;
   const [depart, setDepart] = useState(false);
-  const w = WEATHER_INFO[s.weather];
+  const atmo = engine.atmosphere.summary();
   const hh = String(Math.floor(engine.hour)).padStart(2, "0");
   const mm = String(Math.floor(engine.s.minutes % 60)).padStart(2, "0");
   const ready = s.orders.filter((o) => engine.orderMatches(o).length >= o.count).length;
@@ -128,7 +129,7 @@ export function PortHub({ engine, hot, compact, onOpen, onTravel, onJournal, onC
           <div className="font-serif text-[26px] leading-none text-[#f4eee0] sm:text-[32px]">{port.name}</div>
           <div className="mt-2 flex items-center gap-3 text-[12px] text-[#ddd7ca]">
             <span className="num text-[15px] text-[#f1ebdd]">{hh}:{mm}</span>
-            <span className="flex items-center gap-1"><Icon name={WEATHER_ICON[s.weather]} size={14} className="text-[var(--brass)]" />{w.name}</span>
+            <span className="flex items-center gap-1"><Icon name={WEATHER_ICON[engine.weather]} size={14} className="text-[var(--brass)]" />{atmo.weatherName} · {atmo.temp > 0 ? "+" : ""}{atmo.temp}°</span>
             <span className="hidden dim sm:inline">{SEASONS[engine.season]}, день {engine.dayOfSeason}</span>
           </div>
           {engine.fairBonus > 1 && <div className="mt-1.5 text-[11px] text-[var(--brass-2,#e3c996)]">Ярмарка выходного дня · цены на рынке +10%</div>}
@@ -140,6 +141,7 @@ export function PortHub({ engine, hot, compact, onOpen, onTravel, onJournal, onC
             <AccountBadge account={account} compact onClick={onAccount} />
             <button className="iconbtn" onClick={onJournal} aria-label="Журнал"><Icon name="journal" size={16} />{(engine.perkPoints > 0 || engine.hasLetter || engine.daily.tasks.some((t) => t.done && !t.claimed)) && <span className="dot" />}</button>
             <button className="iconbtn" onClick={onCodex} aria-label="Кодекс"><Icon name="book" size={16} /></button>
+            <button className="iconbtn" onClick={onEvents} aria-label="Явления"><Icon name="sparkle" size={16} />{engine.eventDirector.activeList().length > 0 && <span className="dot" />}</button>
           </div>
           <div className="glass num flex items-center gap-3 whitespace-nowrap px-3 py-1.5 text-[13px]">
             <span className="text-[var(--brass-2,#e3c996)]">{fmt(s.money)} ₽</span>

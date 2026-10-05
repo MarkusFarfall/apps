@@ -352,6 +352,7 @@ export function PortModal({ engine, onClose, onTravel, onRest, onReset, cloud, i
   ];
   const hot = engine.hot;
   const fc = engine.forecast;
+  const atmo = engine.atmosphere.summary();
   const hh = `${String(Math.floor(engine.hour)).padStart(2, "0")}:${String(Math.floor((engine.hour % 1) * 60)).padStart(2, "0")}`;
 
   return (
@@ -639,10 +640,10 @@ export function PortModal({ engine, onClose, onTravel, onRest, onReset, cloud, i
               <h3 className="font-serif mt-1 flex items-center gap-2 text-2xl text-[#f1ebdd]"><MiscIcon name="bed" size={20} className="text-[var(--brass)]" />Ночлег</h3>
               <p className="mt-2 text-[13px] muted">Комнаты сдают с 19:00 до 4:00, не чаще раза за 16 часов. Отдых до пяти утра, за ночь сменится погода и появятся новые заказы. Цена ночлега — <span className="num text-[#ece6d8]">{fmt(engine.port.innFee)} ₽</span>.</p>
               <div className="mt-5 flex items-center gap-4 border-y border-[var(--line)] py-4">
-                <Icon name={WEATHER_ICON[fc.w]} size={30} className="text-[var(--brass)]" />
+                <Icon name={WEATHER_ICON[engine.weather]} size={30} className="text-[var(--brass)]" />
                 <div>
                   <div className="label">Сводка по радио</div>
-                  <div className="text-[13px] text-[#ece6d8]">Сейчас {WEATHER_INFO[s.weather].name.toLowerCase()}. Через ~{Math.max(1, Math.round(fc.inMin / 60))} ч ожидается: {WEATHER_INFO[fc.w].name.toLowerCase()}.</div>
+                  <div className="text-[13px] text-[#ece6d8]">Сейчас {atmo.weatherName.toLowerCase()}, {atmo.temp > 0 ? "+" : ""}{atmo.temp}°, ветер {atmo.wind} м/с, облачность {atmo.cover}%. Через ~{Math.max(1, Math.round(fc.inMin / 60))} ч ожидается: {WEATHER_INFO[fc.w].name.toLowerCase()}.</div>
                 </div>
               </div>
               <button className="btn btn-solid mt-5" disabled={!!engine.restBlock} onClick={onRest}>{engine.restBlock ?? `Снять комнату · ${fmt(engine.port.innFee)} ₽`}</button>

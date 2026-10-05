@@ -1,3 +1,5 @@
+import type { DirectorSave } from "./events/types";
+
 export type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
 export type TimeReq = "any" | "day" | "night" | "twilight";
 export type WeatherId = "clear" | "cloudy" | "rain" | "storm" | "fog" | "snow";
@@ -244,6 +246,8 @@ export interface SaveData {
   cooler: CaughtFish[];
   hints: string[];
   events: ActiveEvent[];
+  /** Подробное состояние новых событий; `events` оставлено для старых сохранений. */
+  eventDirector?: DirectorSave;
   nextEventAt: number;
   milestones: number[];
   stats: {

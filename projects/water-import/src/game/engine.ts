@@ -1,8 +1,12 @@
 import { FISH, FISH_BY_ID, RARITY_INFO, VARIANT_INFO } from "./fish";
+import { Atmosphere, type LightningStrike } from "./atmosphere";
+import { ctxFromAtmosphere, EventDirector } from "./events";
+import type { DirectorMessage, DirectorSave, Outcome } from "./events/types";
+import { GAME_EVENT_BY_ID, GAME_EVENTS } from "./events/gameCatalog";
 import { ACHIEVEMENTS, FINDS, FIND_BY_ID, levelFromXp, levelReward, levelTitle, PERKS, perkPoints, QUESTS, RANK_LEVEL, rankCost, spentPoints, type FindDef } from "./progress";
 import type { GearKind } from "./world";
 import { applyDaily, dailyChestReward, newDaily, rollDaily, streakBonus, todayKey, makeTasks, type DailyEvent, type DailyState } from "./daily";
-import type { ActiveEvent, BaitId, CaughtFish, FishDef, LocId, Order, PortId, Rarity, SaveData, Season, Variant } from "./types";
+import type { ActiveEvent, BaitId, CaughtFish, FishDef, LocId, Order, PortId, Rarity, SaveData, Season, Variant, WeatherId } from "./types";
 import {
   BAIT_BY_ID,
   BOATS,
@@ -19,8 +23,6 @@ import {
   travelHoursBetween,
   LEGACY_BOAT_IDS,
   DAYS_PER_SEASON,
-  EVENTS,
-  EVENT_BY_ID,
   LINES,
   LOC_BY_ID,
   MILESTONES,
@@ -171,7 +173,17 @@ export function migrateSave(raw: unknown): SaveData | null {
   if (!WEATHER_INFO[s.weather]) s.weather = "clear";
   if (!WEATHER_INFO[s.weatherQueued]) s.weatherQueued = "cloudy";
   s.cooler = Array.isArray(s.cooler) ? s.cooler.filter((c) => FISH_BY_ID[c.fishId]) : [];
-  s.events = Array.isArray(s.events) ? s.events.filter((e) => EVENT_BY_ID[e.id]) : [];
+  s.events = Array.isArray(s.events) ? s.events.filter((e) => GAME_EVENT_BY_ID[e.id]) : [];
+  const rawDirector: unknown = (raw as Record<string, unknown>).eventDirector;
+  if (rawDirector && typeof rawDirector === "object" && !Array.isArray(rawDirector) && (rawDirector as Record<string, unknown>).v === 1) {
+    const eventT = Number.isFinite(s.minutes) ? Math.max(0, Math.min(100_000_000, s.minutes)) : base.minutes;
+    const seed = ((eventT | 0) ^ (s.location.length * 0x45d9f3b) ^ 0x9e3779b9) | 0;
+    const director = new EventDirector({ seed, catalog: GAME_EVENTS, startT: eventT });
+    director.load(rawDirector as DirectorSave);
+    s.eventDirector = director.save();
+  } else if (rawDirector !== undefined) {
+    delete s.eventDirector;
+  }
   s.orders = Array.isArray(s.orders) ? s.orders.filter((o) => FISH_BY_ID[o.fishId]) : [];
   s.flags = Array.isArray(s.flags) ? s.flags : [];
   s.hints = Array.isArray(s.hints) ? s.hints : [];
@@ -227,7 +239,31 @@ const rid = () => Math.random().toString(36).slice(2, 10);
 const ri = (n: number) => Math.floor(Math.random() * n);
 
 export class Engine {
-  s: SaveData;
+  private save: SaveData;
+  private atmosphereInstance: Atmosphere | null = null;
+  private eventDirectorInstance: EventDirector | null = null;
+  private lastEventCheckpoint = -1;
+  get s(): SaveData { return this.save; }
+  set s(value: SaveData) {
+    this.save = value;
+    if (this.atmosphereInstance || this.eventDirectorInstance) {
+      this.initializeEventDirector();
+      this.initializeAtmosphere();
+    }
+  }
+  get atmosphere(): Atmosphere {
+    if (!this.atmosphereInstance) throw new Error("Atmosphere has not been initialized");
+    return this.atmosphereInstance;
+  }
+  get eventDirector(): EventDirector {
+    if (!this.eventDirectorInstance) throw new Error("EventDirector has not been initialized");
+    return this.eventDirectorInstance;
+  }
+  /** Weather as experienced by the player (may differ from the 6-state save during wet-snow transitions). */
+  get weather(): WeatherId { return this.atmosphere.weatherId; }
+  /** Lightning strikes waiting for the audio loop; position/distance are kept for delayed thunder. */
+  lightningEvents: LightningStrike[] = [];
+  lastLightningStrike: LightningStrike | null = null;
   phase: Phase = "idle";
   paused = true;
   time = 0;
@@ -270,7 +306,119 @@ export class Engine {
   private listeners = new Set<() => void>();
 
   constructor(save?: SaveData) {
-    this.s = save ?? newSave();
+    this.save = save ?? newSave();
+    this.initializeEventDirector();
+    this.initializeAtmosphere();
+  }
+
+  private initializeEventDirector() {
+    const save = this.s;
+    const seed = ((save.minutes | 0) ^ (save.location.length * 0x45d9f3b) ^ 0x9e3779b9) | 0;
+    const director = new EventDirector({ seed, catalog: GAME_EVENTS, startT: save.minutes });
+    if (save.eventDirector && typeof save.eventDirector === "object" && save.eventDirector.v === 1) {
+      director.load(save.eventDirector);
+    } else {
+      director.fromLegacy(Array.isArray(save.events) ? save.events : [], save.nextEventAt, save.minutes);
+    }
+    this.eventDirectorInstance = director;
+    this.lastEventCheckpoint = -1;
+    director.on((message) => this.handleEventMessage(message));
+  }
+
+  private initializeAtmosphere() {
+    this.lightningEvents.length = 0;
+    this.lastLightningStrike = null;
+    this.lightning = 0;
+    const save = this.s;
+    const climate = LOC_BY_ID[save.location]?.climate ?? "temperate";
+    const seed = ((save.minutes | 0) ^ (save.location.length * 0x45d9f3b)) | 0;
+    this.atmosphereInstance = new Atmosphere({ climate, seed });
+    this.atmosphereInstance.onLightning((strike) => {
+      this.lastLightningStrike = strike;
+      this.lightningEvents.push(strike);
+      if (this.lightningEvents.length > 4) this.lightningEvents.shift();
+      this.lightning = Math.max(this.lightning, strike.power);
+      if (strike.dist < 0.3) this.shake = Math.max(this.shake, (0.3 - strike.dist) * 0.3);
+    });
+    this.syncAtmosphere(0);
+  }
+
+  /** Keep the atmosphere and event director on the in-game clock and local climate. */
+  syncAtmosphere(dt = 0) {
+    const atm = this.atmosphereInstance;
+    const director = this.eventDirectorInstance;
+    if (!atm || !director) return;
+    const T = Math.max(0, this.s.minutes);
+    const elapsedDay = Math.floor(T / MIN_PER_DAY);
+    atm.syncFromGame({
+      minute: ((T % MIN_PER_DAY) + MIN_PER_DAY) % MIN_PER_DAY,
+      day: elapsedDay,
+      season: this.season,
+      weather: this.s.weather,
+      climate: this.loc.climate,
+      moonPhase: ((elapsedDay % 8) + 8) % 8 / 8,
+      daysPerSeason: DAYS_PER_SEASON,
+    });
+    atm.update(Math.max(0, dt));
+    director.update(T, ctxFromAtmosphere(atm, { loc: this.s.location, deep: this.loc.maxDepth > 100 }));
+    atm.mods = director.atmoMods();
+    // Применить эффекты текущего кадра сразу, не продвигая игровые часы повторно.
+    atm.update(0);
+    if (Math.floor(T) !== this.lastEventCheckpoint) {
+      this.lastEventCheckpoint = Math.floor(T);
+      this.persistEventDirector(false);
+    }
+  }
+
+  private persistEventDirector(markDirty: boolean) {
+    const director = this.eventDirectorInstance;
+    if (!director) return;
+    const legacy = director.toLegacy();
+    this.s.events = legacy.events;
+    this.s.nextEventAt = legacy.nextEventAt;
+    this.s.eventDirector = director.save();
+    if (markDirty) this.markDirty();
+  }
+
+  private handleEventMessage(message: DirectorMessage) {
+    if (message.type === "outcome") this.applyEventOutcome(message.outcome);
+    this.persistEventDirector(false);
+    this.markDirty();
+  }
+
+  private applyEventOutcome(outcome: Outcome) {
+    const reward = outcome.reward;
+    if (reward?.money) this.s.money = Math.max(0, this.s.money + Math.round(reward.money));
+    if (reward?.xp) this.addXp(Math.round(reward.xp));
+    if (reward?.item && FIND_BY_ID[reward.item]) {
+      this.s.finds[reward.item] = (this.s.finds[reward.item] ?? 0) + 1;
+      this.checkProgress();
+    }
+    const baitReward = reward?.bait;
+    const baitId = baitReward?.id as BaitId | undefined;
+    if (baitReward && baitId && baitId in BAIT_BY_ID) {
+      this.s.baits[baitId] = Math.min(500, (this.s.baits[baitId] ?? 0) + Math.max(0, Math.floor(baitReward.count)));
+    }
+    const chips = [
+      reward?.money ? `${reward.money > 0 ? "+" : "−"}${Math.abs(Math.round(reward.money))} ₽` : "",
+      reward?.xp ? `+${Math.round(reward.xp)} опыта` : "",
+      reward?.item && FIND_BY_ID[reward.item] ? FIND_BY_ID[reward.item].name : "",
+      reward?.bait ? `${BAIT_BY_ID[reward.bait.id as BaitId]?.name ?? reward.bait.id} ×${reward.bait.count}` : "",
+    ].filter(Boolean).join(" · ");
+    const kind = outcome.tone === "bad" ? "bad" : outcome.tone === "good" ? "event" : "info";
+    this.toast(outcome.text, kind, chips || undefined);
+  }
+
+  chooseEvent(uid: number, choiceId: string) {
+    const outcome = this.eventDirector.choose(uid, choiceId);
+    if (outcome) this.persistEventDirector(true);
+    return outcome;
+  }
+
+  setEventsAuto(auto: boolean) {
+    if (this.eventDirector.auto === auto) return;
+    this.eventDirector.auto = auto;
+    this.persistEventDirector(true);
   }
 
   // ─────────── derived ───────────
@@ -291,23 +439,25 @@ export class Engine {
   get sonar() { return SONARS[this.s.sonar]; }
   get maxDepth() { return Math.min(this.spot.maxDepth, this.line.value); }
   get timeOfDay(): "night" | "twilight" | "day" {
+    // Игровые окна для рыбы и событий остаются прежними; атмосферные сумерки
+    // меняют только картинку, не правила клёва.
     const h = this.hour;
     if (h < 4.8 || h >= 20.8) return "night";
     if (h < 7.5 || h >= 18.3) return "twilight";
     return "day";
   }
   get isNight() { return this.timeOfDay === "night"; }
-  get temperature() {
-    const base = { temperate: [12, 24, 13, 2], north: [4, 14, 5, -8], tropic: [27, 31, 28, 25], ocean: [16, 24, 17, 10], polar: [-6, 1, -8, -22], misty: [13, 17, 15, 10] }[this.loc.climate][this.season];
-    const diurnal = Math.sin(((this.hour - 9) / 24) * Math.PI * 2) * 4;
-    const w = { clear: 1, cloudy: -1, rain: -3, storm: -4, fog: -2, snow: -4 }[this.s.weather];
-    return Math.round(base + diurnal + w);
+  get temperature() { return Math.round(this.atmosphere.state.temp); }
+  get activeEvents(): ActiveEvent[] {
+    const director = this.eventDirectorInstance;
+    if (!director) return this.s.events.filter((e) => e.endsAt > this.s.minutes);
+    return director.activeList()
+      .filter((entry) => entry.live.phase === "active")
+      .map((entry) => ({ id: entry.live.id, endsAt: Math.round(entry.live.end) }));
   }
-  get activeEvents() { return this.s.events.filter((e) => e.endsAt > this.s.minutes); }
+  get eventEffects() { return this.eventDirector.multipliers(); }
   eventMult(key: "bite" | "rare" | "legendary") {
-    let m = 1;
-    for (const e of this.activeEvents) m *= EVENT_BY_ID[e.id]?.[key] ?? 1;
-    return m;
+    return this.eventEffects[key];
   }
   perk(id: string) { return this.s.perks[id] ?? 0; }
   get level() { return levelFromXp(this.s.xp); }
@@ -320,7 +470,7 @@ export class Engine {
   get title() { return levelTitle(this.level); }
   /** Штормовой бонус силы рыбы с учётом судна и навыка */
   get stormPenalty() {
-    if (this.s.weather !== "storm") return 1;
+    if (this.weather !== "storm") return 1;
     const base = this.boat.stormSafe ? 0.08 : 0.3;
     const w = this.perk("weather");
     return 1 + base * (1 - this.boat.stability * 0.6) * (w >= 3 ? 0 : w >= 2 ? 0.5 : 1);
@@ -410,12 +560,7 @@ export class Engine {
       this.emit();
     }
     this.tickWorld();
-
-    if (this.s.weather === "storm" && Math.random() < wdt * 0.12) {
-      this.lightning = 1;
-      this.shake = Math.max(this.shake, 0.1);
-      this.sfx.push("thunder");
-    }
+    this.syncAtmosphere(wdt);
 
     switch (this.phase) {
       case "charging":
@@ -479,9 +624,8 @@ export class Engine {
       s.weatherNext = s.minutes + 120 + Math.random() * 240;
       s.wind = Math.min(1, Math.max(0, WEATHER_INFO[s.weather].wave * 0.35 + (Math.random() - 0.5) * 0.3));
       const noEvent = !this.activeEvents.some((e) => e.id !== "bottle");
-      if (noEvent && Math.random() < 0.35 && (prev === "rain" || prev === "storm") && (s.weather === "clear" || s.weather === "cloudy") && this.timeOfDay === "day" && this.loc.id !== "abyss") {
-        s.events.push({ id: "rainbow", endsAt: s.minutes + 90 });
-        this.toast("Радуга над водой", "event", "Редкие виды клюют охотнее");
+      if (noEvent && Math.random() < 0.35 && (prev === "rain" || prev === "storm") && (s.weather === "clear" || s.weather === "cloudy") && this.atmosphere.state.daylight > 0.55 && this.loc.id !== "abyss") {
+        this.eventDirector.trigger("rainbow", { force: true, skipOmen: true });
       }
       if (prev !== s.weather && (s.weather === "storm" || s.weather === "fog" || prev === "storm")) {
         if (s.weather === "storm") this.toast("Надвигается шторм", "bad", this.boat.stormSafe ? "Судно выдержит. Рыба активна" : "Лёгкую лодку качает — рыба рвёт сильнее");
@@ -490,36 +634,6 @@ export class Engine {
       }
       this.markDirty();
     }
-    if (s.minutes >= s.nextEventAt) {
-      s.nextEventAt = s.minutes + 520 + Math.random() * 640;
-      const busyEvent = this.activeEvents.some((e) => e.id !== "bottle");
-      if (!s.atPort && !busyEvent && Math.random() < 0.75) this.rollEvent();
-    }
-    s.events = s.events.filter((e) => e.endsAt > s.minutes);
-  }
-
-  rollEvent() {
-    const ctx = { night: this.isNight, weather: this.s.weather, loc: this.s.location, season: this.season };
-    const pool = EVENTS.filter((e) => !e.requires || e.requires(ctx)).filter((e) => !this.s.events.some((a) => a.id === e.id));
-    if (!pool.length) return;
-    const ev = pool[ri(pool.length)];
-    this.sfx.push("event");
-    if (ev.id === "bottle") {
-      const uncaught = FISH.filter((f) => !this.s.codex[f.id] && !this.s.hints.includes(f.id));
-      if (uncaught.length && Math.random() < 0.6) {
-        const f = uncaught[ri(uncaught.length)];
-        this.s.hints.push(f.id);
-        this.toast("Бутылка с запиской", "event", `Заметки о виде «${f.name}» — в кодексе`);
-      } else {
-        const coins = Math.round((40 + Math.random() * 160) * (1 + this.loc.boatTier * 1.5));
-        this.s.money += coins;
-        this.toast("Бутылка у борта", "event", `Внутри старинные монеты: +${coins} ₽`);
-      }
-    } else {
-      this.s.events.push({ id: ev.id, endsAt: this.s.minutes + ev.duration } as ActiveEvent);
-      this.toast(ev.name, "event", ev.desc);
-    }
-    this.markDirty();
   }
 
   // ─────────── input ───────────
@@ -584,7 +698,7 @@ export class Engine {
     const timeMult = { twilight: 1.35, night: 1.0, day: 0.9 }[this.timeOfDay];
     const bd = this.bait;
     const inRange = this.hookDepth >= bd.depth[0] && this.hookDepth <= bd.depth[1];
-    const bite = WEATHER_INFO[this.s.weather].bite * this.eventMult("bite") * timeMult * bd.bite * (inRange ? 1 : 0.6);
+    const bite = WEATHER_INFO[this.weather].bite * this.eventMult("bite") * timeMult * bd.bite * (inRange ? 1 : 0.6);
     this.biteTimer = (3 + Math.random() * 9) / bite / (1 + this.perk("patience") * 0.06 + this.mod("line_fluoro") * 0.05) / this.boat.quiet;
   }
 
@@ -594,6 +708,8 @@ export class Engine {
     const currentEv = this.activeEvents.some((e) => e.id === "current");
     const bait = s.currentBait;
     const spot = this.spot;
+    const eventEffects = this.eventEffects;
+    const eventLuck = Math.max(0, Math.min(2, eventEffects.luck));
     const res: { fish: FishDef; w: number }[] = [];
     const bd = BAIT_BY_ID[bait];
     for (const f of FISH) {
@@ -601,16 +717,16 @@ export class Engine {
       const minD = currentEv ? f.depth[0] * 0.6 : f.depth[0];
       if (depth < minD - 0.5 || depth > f.depth[1] + 0.5) continue;
       if (f.time !== "any" && f.time !== tod) continue;
-      if (f.weather && !f.weather.includes(s.weather)) continue;
+      if (f.weather && !f.weather.includes(this.weather)) continue;
       if (f.season && !f.season.includes(this.season)) continue;
       if (f.moon === "full" && this.moonIndex !== 4) continue;
       if (f.moon === "new" && this.moonIndex !== 0) continue;
       let w: number = RARITY_INFO[f.rarity].weight;
       if (spot.bias.includes(f.id)) w *= f.rarity === "legendary" ? 3 : 2.5;
-      if (f.rarity !== "common" && f.rarity !== "uncommon") w *= 1 + this.perk("luck") * 0.07 + this.boat.rareBonus + this.mod("hook_stealth") * 0.03;
-      if (f.rarity === "rare" || f.rarity === "epic") w *= this.eventMult("rare");
+      if (f.rarity !== "common" && f.rarity !== "uncommon") w *= 1 + this.perk("luck") * 0.07 + this.boat.rareBonus + this.mod("hook_stealth") * 0.03 + eventLuck;
+      if (f.rarity === "rare" || f.rarity === "epic") w *= eventEffects.rare;
       if (f.rarity === "legendary") {
-        w *= this.eventMult("legendary") * this.eventMult("rare");
+        w *= eventEffects.legendary * eventEffects.rare;
         if (this.baitMatch(f, bait) < 2) w *= 0.15;
       }
       w *= this.baitMatch(f, bait);
@@ -703,7 +819,7 @@ export class Engine {
     const rr = Math.random();
     const weight = +(pick.weight[0] + (pick.weight[1] - pick.weight[0]) * Math.pow(rr, 1.7 - this.bait.size * 0.45)).toFixed(pick.weight[1] < 1 ? 3 : 2);
     let variant: Variant | null = null;
-    const v = Math.random() / (1 + this.perk("luck") * 0.1);
+    const v = Math.random() / (1 + this.perk("luck") * 0.1 + Math.max(0, Math.min(2, this.eventEffects.luck)));
     if (v < 0.004) variant = "golden";
     else if (v < 0.016) variant = "albino";
     else if (v < 0.026) variant = "melanist";
@@ -849,7 +965,9 @@ export class Engine {
 
     if (h.tension > 1) {
       h.overload += dt;
-      if (h.overload > 0.38 * (1 + this.mod("reel_drag") * 0.18)) return this.endFight("snap");
+      const gearRisk = Math.max(0, Math.min(1, this.eventEffects.gearRisk));
+      const overloadLimit = 0.38 * (1 + this.mod("reel_drag") * 0.18) * (1 - gearRisk * 0.45);
+      if (h.overload > overloadLimit) return this.endFight("snap");
     } else {
       h.overload = Math.max(0, h.overload - dt * 0.8);
     }
@@ -923,15 +1041,15 @@ export class Engine {
     }
     this.s.stats.totalCaught++;
     if (this.isNight) this.s.stats.nightCatches++;
-    if (this.s.weather === "storm") this.s.stats.stormCatches++;
+    if (this.weather === "storm") this.s.stats.stormCatches++;
     this.s.stats.maxDepthCaught = Math.max(this.s.stats.maxDepthCaught, h.startDepth);
     const wN = (h.weight - f.weight[0]) / Math.max(0.001, f.weight[1] - f.weight[0]);
-    const xp = Math.round({ common: 10, uncommon: 22, rare: 55, epic: 140, legendary: 450 }[f.rarity] * (1 + wN * 0.6) * (h.variant ? 1.5 : 1) + (isNew ? 40 : 0) + (this.perfectHook ? 5 : 0)) * (1 + this.loc.boatTier * 0.45) | 0;
+    const xp = Math.round(Math.round({ common: 10, uncommon: 22, rare: 55, epic: 140, legendary: 450 }[f.rarity] * (1 + wN * 0.6) * (h.variant ? 1.5 : 1) + (isNew ? 40 : 0) + (this.perfectHook ? 5 : 0)) * (1 + this.loc.boatTier * 0.45) * this.eventEffects.xp) | 0;
     this.addXp(xp);
     const big = this.s.stats.biggest;
     if (!big || h.weight > big.weight) this.s.stats.biggest = { fishId: f.id, weight: h.weight };
     this.lastCatch = { item, isNew, isRecord, bonus, xp, perfect: this.perfectHook };
-    this.dailyEvent({ k: "catch", fish: f.id, rarity: f.rarity, weight: h.weight, loc: this.s.location, variant: !!h.variant, perfect: this.perfectHook, night: this.isNight, weather: this.s.weather, depth: h.startDepth, isNew, bait: this.s.currentBait, spot: this.s.spot, hour: this.hour, record: isRecord, shape: f.shape, value, season: this.season });
+    this.dailyEvent({ k: "catch", fish: f.id, rarity: f.rarity, weight: h.weight, loc: this.s.location, variant: !!h.variant, perfect: this.perfectHook, night: this.isNight, weather: this.weather, depth: h.startDepth, isNew, bait: this.s.currentBait, spot: this.s.spot, hour: this.hour, record: isRecord, shape: f.shape, value, season: this.season });
     if (this.perfectHook) this.s.stats.perfectHooks += 0;
     this.phase = "caught";
     this.splash = 1;
@@ -1264,6 +1382,7 @@ export class Engine {
     } else {
       this.arriveAt(t.loc, t.spot);
     }
+    this.syncAtmosphere(0);
     this.fade = 0.6;
     this.markDirty();
     return true;
@@ -1337,6 +1456,7 @@ export class Engine {
     this.payFuel(Math.round(this.boat.fuel / 3));
     this.s.spot = id;
     this.s.targetDepth = Math.min(this.s.targetDepth, this.maxDepth);
+    this.syncAtmosphere(0);
     this.fade = 0.9;
     this.sfx.push("travel");
     this.toast(sp.name, "info", `${sp.maxDepth} м`);
@@ -1381,7 +1501,7 @@ export class Engine {
   /** Ставка за одну рыбу вида: ниже неё рынок не опускается никогда. */
   baseValue(fishId: string) { const f = FISH_BY_ID[fishId]; return f ? RARITY_INFO[f.rarity].base : 1; }
   marketValue(c: CaughtFish, extra = 0) {
-    const raw = c.value * this.marketMult(c.fishId, extra) * this.freshness(c) * (1 + this.perk("trader") * 0.04);
+    const raw = c.value * this.marketMult(c.fishId, extra) * this.freshness(c) * (1 + this.perk("trader") * 0.04) * this.eventEffects.price;
     // Перегруженный рынок и лежалый улов сбивают цену, но не ниже ставки за вид.
     return Math.max(this.baseValue(c.fishId), Math.round(raw));
   }
@@ -1632,6 +1752,7 @@ export class Engine {
     this.s.minutes += add;
     this.s.weatherNext = this.s.minutes;
     this.s.lastRest = this.s.minutes;
+    this.syncAtmosphere(0);
     this.fade = 1;
     this.refreshOrders();
     this.markDirty();

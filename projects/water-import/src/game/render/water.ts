@@ -1,5 +1,5 @@
 import type { Frame } from "./frame";
-import { clamp, ctx2d, hexA, makeCanvas, mix, rng, af } from "./util";
+import { clamp, ctx2d, hexA, makeCanvas, mix, rng, af, rgbHex } from "./util";
 
 let causticTile: HTMLCanvasElement | null = null;
 
@@ -56,24 +56,27 @@ export function tileCaustics(ctx: CanvasRenderingContext2D, x0: number, y0: numb
 }
 
 export function seaSurfaceColor(f: Frame) {
-  return mix(mix(f.loc.water.surface, f.top, 0.25), "#02050c", f.night * 0.72);
+  const near = mix(f.loc.water.surface, rgbHex(f.atmo.palette.seaNear), 0.32);
+  return mix(mix(near, f.top, 0.25), "#02050c", f.night * 0.72);
 }
 
 /** Дальняя полоса моря между горизонтом и разрезом */
 export function drawSeaBand(f: Frame, reflect: () => void) {
   const { ctx, W, hY, sY, t, night } = f;
   const water = seaSurfaceColor(f);
+  const far = mix(f.loc.water.surface, rgbHex(f.atmo.palette.seaFar), 0.32);
+  const near = mix(f.loc.water.shallow, rgbHex(f.atmo.palette.seaNear), 0.24);
   const g = ctx.createLinearGradient(0, hY, 0, sY + f.amp + 4);
-  g.addColorStop(0, mix(f.hor, water, 0.35));
+  g.addColorStop(0, mix(mix(f.hor, far, 0.35), water, 0.15));
   g.addColorStop(0.35, mix(water, f.hor, 0.2));
-  g.addColorStop(1, mix(water, mix(f.loc.water.shallow, "#02050c", night * 0.8), 0.4));
+  g.addColorStop(1, mix(water, mix(near, "#02050c", night * 0.8), 0.4));
   ctx.fillStyle = g;
   ctx.fillRect(0, hY, W, sY - hY + f.amp * 2 + 6);
   reflect();
 
   // перспективная рябь
   const band = sY - hY;
-  const lightC = mix(mix(f.mid, "#ffffff", 0.25), "#1a2438", night * 0.8);
+  const lightC = mix(mix(f.mid, rgbHex(f.atmo.palette.glow), 0.18), "#1a2438", night * 0.8);
   const darkC = mix(water, "#000000", 0.35);
   const rows = f.quality > 0 ? 34 : 14;
   for (let i = 0; i < rows; i++) {
@@ -93,7 +96,7 @@ export function drawSeaBand(f: Frame, reflect: () => void) {
   }
   if (f.fogK > 0.3) {
     const fg = ctx.createLinearGradient(0, hY - 20, 0, hY + band * 0.8);
-    const fc = mix("#c4ccd2", "#101820", night * 0.85);
+    const fc = mix(rgbHex(f.atmo.palette.fog), "#101820", night * 0.85);
     fg.addColorStop(0, hexA(fc, 0.8 * f.fogK));
     fg.addColorStop(1, hexA(fc, 0));
     ctx.fillStyle = fg;
@@ -101,9 +104,9 @@ export function drawSeaBand(f: Frame, reflect: () => void) {
   }
 
   // дорожка солнца / луны
-  const sun = f.sunElev > -0.02;
+  const sun = f.sunElev > 0;
   const gx = sun ? f.sunX : f.moonX;
-  const ga = sun ? 0.95 * f.sunVis : f.moonUp ? 0.5 * f.moonVis * ((1 - Math.cos((f.e.moonIndex / 8) * Math.PI * 2)) / 2) : 0;
+  const ga = sun ? 0.95 * f.sunVis : f.moonUp ? 0.5 * f.moonVis * f.atmo.moonIllum : 0;
   if (ga > 0.03) {
     const col = sun ? mix("#fff4d8", "#ffa860", f.golden) : "#dce6ff";
     ctx.save();
@@ -116,7 +119,7 @@ export function drawSeaBand(f: Frame, reflect: () => void) {
     for (let i = 0; i < 90; i++) {
       const p = ((i * 0.618) % 1);
       const y = hY + band * p * p;
-      const spread = 8 + p * 150 * (sun ? 1 - f.sunElev * 0.5 : 0.7);
+      const spread = 8 + p * 150 * (sun ? 1 - clamp(f.sunElev / 60, 0, 1) * 0.5 : 0.7);
       const x = gx + Math.sin(i * 12.9898 + Math.floor(t * 4 + i * 0.37) * 3.1) * spread;
       const a = ga * 0.55 * (0.25 + 0.75 * Math.abs(Math.sin(t * 5 + i * 1.7)));
       ctx.fillStyle = hexA(col, a);
@@ -130,6 +133,10 @@ export function drawSeaBand(f: Frame, reflect: () => void) {
 export function drawUnderwaterBody(f: Frame) {
   const { ctx, W, H, sY, cam } = f;
   const wc = f.loc.water;
+  const surface = mix(wc.surface, rgbHex(f.atmo.palette.seaNear), 0.34);
+  const shallow = mix(wc.shallow, rgbHex(f.atmo.palette.seaNear), 0.28);
+  const mid = mix(wc.mid, rgbHex(f.atmo.palette.deep), 0.24);
+  const deep = mix(wc.deep, rgbHex(f.atmo.palette.abyss), 0.2);
   const bottom = cam + H + 10;
   const top = Math.max(sY - f.amp * 2 - 4, cam - 10);
   if (bottom <= top) return;
@@ -137,10 +144,10 @@ export function drawUnderwaterBody(f: Frame) {
   const ug = ctx.createLinearGradient(0, sY, 0, sY + span);
   const nk = f.night * 0.78 + (1 - f.day) * 0.08;
   const dk = "#01040a";
-  ug.addColorStop(0, mix(mix(wc.surface, f.top, 0.12), dk, nk * 0.85));
-  ug.addColorStop(0.18, mix(wc.shallow, dk, nk * 0.9));
-  ug.addColorStop(0.55, mix(wc.mid, dk, nk * 0.92));
-  ug.addColorStop(1, mix(wc.deep, dk, nk * 0.6));
+  ug.addColorStop(0, mix(mix(surface, f.top, 0.12), dk, nk * 0.85));
+  ug.addColorStop(0.18, mix(shallow, dk, nk * 0.9));
+  ug.addColorStop(0.55, mix(mid, dk, nk * 0.92));
+  ug.addColorStop(1, mix(deep, dk, nk * 0.6));
   ctx.fillStyle = ug;
   ctx.fillRect(0, top, W, bottom - top);
 }
@@ -206,7 +213,7 @@ export function drawDepthOverlay(f: Frame) {
   const bottom = cam + H + 5;
   if (bottom <= top) return;
   const L = 22 + f.clarity * 45;
-  const storm = f.weather === "storm" ? 0.18 : f.weather === "rain" ? 0.1 : f.fogK * 0.06;
+  const storm = clamp(f.atmo.dark * 0.14 + f.atmo.precip * 0.06 + f.fogK * 0.06, 0, 0.24);
   const dark = mix(f.loc.water.deep, "#000308", 0.65);
   const maxD = Math.max(f.spot.maxDepth * 1.3, 40);
   const span = f.depthPx(maxD);

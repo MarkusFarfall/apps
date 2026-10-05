@@ -1,9 +1,10 @@
-import type { Engine } from "../engine";
+import { TIME_SCALE, type Engine } from "../engine";
 import type { PortId } from "../types";
 import { drawBoat } from "./boat";
 import type { Frame } from "./frame";
-import { skyAt, WEATHER_TINT } from "./sky";
-import { clamp, glow, hash1, hexA, mix, rng } from "./util";
+import { drawBolt, drawIce, drawLeaves, drawRainbow, drawRain, drawSnow, makeBolt, type Bolt } from "./weatherFx";
+import { drawEventFx, type FxCall, type FxScene } from "./eventFx";
+import { clamp, glow, hash1, hexA, mix, rng, rgbHex } from "./util";
 
 export type Building = "market" | "shop" | "shipyard" | "tavern";
 export interface Hotspot { id: Building | "dock"; x: number; y: number }
@@ -46,9 +47,10 @@ export class PortScene {
   private smokeT = 0;
   private gulls: [number, number, number][] = [];
   private key = "";
-  private flakes: [number, number, number][] = [];
   private reflecting = false;
   private clouds: [number, number, number, number][] = [];
+  private lightningBolt: Bolt = [];
+  private lastBoltSeed = -1;
 
   render(ctx: CanvasRenderingContext2D, e: Engine, W: number, H: number, dt: number) {
     this.t += dt;
@@ -56,16 +58,40 @@ export class PortScene {
     const pid = e.s.port;
     const P = PAL[pid];
     const L = LAYOUT[pid];
-    const hour = e.hour;
-    const weather = e.s.weather;
-    const sunA = (hour - 5.4) / 14.8;
-    const sunElev = Math.sin(clamp(sunA, -0.1, 1.1) * Math.PI);
-    const night = 1 - clamp(sunElev * 3 + 0.12, 0, 1);
-    const golden = clamp(1 - Math.abs(sunElev - 0.1) / 0.22, 0, 1);
+    const atmo = e.atmosphere.state;
+    const weather = e.weather;
+    const sunElev = atmo.sunElev;
+    const night = atmo.night;
+    const golden = atmo.golden;
     const sc = clamp(Math.min(H / 820, W / 760), 0.5, 1.3);
     const hY = H * 0.5;
     const quayY = H * 0.66;
     const waterY = H * 0.715;
+    const waveAmp = (1.4 + atmo.waves * 0.45) * sc;
+    const waveY = (x: number) => waterY + 4 * sc + Math.sin(x * 0.02 + t * 1.1) * waveAmp + Math.sin(t * 0.7) * 1.2 * sc;
+    const dockX = W * L.dock;
+    let fxRodTip: readonly [number, number] = [dockX + 100 * sc, waterY - 62 * sc];
+    const visibleFx = new Map(e.eventDirector.visible().map((event) => [event.uid, event]));
+    const fxCalls: FxCall[] = [];
+    for (const { live, def } of e.eventDirector.activeList()) {
+      const event = visibleFx.get(live.uid);
+      if (!event || !def.fx?.length) continue;
+      const age = Math.max(0, (e.s.minutes - live.start) / TIME_SCALE);
+      for (const spec of def.fx) fxCalls.push({ e: event, spec, age });
+    }
+    const fxScene = (): FxScene => ({
+      c: ctx, t, W, H, s: sc, q: 2, horizon: hY, surface: waterY, seabed: H, visW: W, cam: 0,
+      windPx: atmo.wind * atmo.windDir * 26 * sc, sAt: waveY,
+      glow: (x, y, r, col, a) => glow(ctx, x, y, r, rgbHex(col), a),
+      sun: { x: sunX, y: sunY }, moon: { x: moonX, y: moonY }, rocks: [],
+      capeX: W * 0.78, capeTop: hY, rodTip: fxRodTip,
+      mast: [dockX + 8 * sc, waterY - 45 * sc], lantern: [dockX, quayY - 42 * sc], boatX: dockX + 40 * sc,
+      A: atmo, pal: atmo.palette,
+    });
+    const sunX = W * clamp((atmo.sunAz - 45) / 270, 0, 1);
+    const sunY = hY - Math.sin((sunElev * Math.PI) / 180) * H * 0.4;
+    const moonX = W * clamp((atmo.moonAz - 45) / 270, 0, 1);
+    const moonY = hY - Math.sin((atmo.moonElev * Math.PI) / 180) * H * 0.3;
     const key = `${pid}|${W}|${H}`;
     if (key !== this.key) {
       this.key = key;
@@ -73,33 +99,32 @@ export class PortScene {
       const cols = ["#3a3a44", "#5a3a2a", "#2a3a5a", "#4a4a3a", "#6a2a2a"];
       this.walkers = Array.from({ length: pid === "southcross" ? 4 : 7 }, () => ({ x: r() * W, v: (r() < 0.5 ? -1 : 1) * (12 + r() * 16) * sc, seed: r() * 100, c: cols[Math.floor(r() * cols.length)], crate: r() < 0.35 }));
       this.gulls = Array.from({ length: 5 }, () => [r() * W, H * (0.08 + r() * 0.2), r() * 6]);
-      this.flakes = Array.from({ length: 160 }, () => [r() * W, r() * H, 0.6 + r() * 1.8]);
       this.clouds = Array.from({ length: 7 }, () => [r() * W * 1.3 - W * 0.15, H * (0.05 + r() * 0.25), (70 + r() * 110) * sc, 4 + r() * 6]);
       this.smoke = [];
     }
 
     // ───── небо ─────
-    const [t0, m0, h0] = skyAt(hour);
-    const [tint, tAmt] = WEATHER_TINT[weather];
-    const tc = mix(tint, "#05080f", night * 0.85);
-    const top = mix(t0, tc, tAmt), mid = mix(m0, tc, tAmt), hor = mix(h0, tc, tAmt * 0.85);
+    const tAmt = clamp(atmo.cover * 0.45 + atmo.dark * 0.45 + atmo.fog * 0.1, 0, 1);
+    const top = rgbHex(atmo.palette.skyTop);
+    const mid = rgbHex(atmo.palette.skyMid);
+    const hor = rgbHex(atmo.palette.skyHor);
     const g = ctx.createLinearGradient(0, 0, 0, hY);
     g.addColorStop(0, top);
     g.addColorStop(0.6, mid);
     g.addColorStop(1, hor);
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, hY + 2);
-    if (night > 0.3 && weather !== "rain" && weather !== "storm" && weather !== "fog") {
+    if (atmo.starVis > 0.01) {
       const r = rng(9);
-      for (let i = 0; i < 140; i++) {
+      for (let i = 0; i < 180; i++) {
         const x = r() * W, y = Math.pow(r(), 1.3) * hY * 0.9, s = r() * 1.3 + 0.3;
-        ctx.globalAlpha = night * (0.4 + 0.6 * Math.sin(t * 2 + i));
+        ctx.globalAlpha = atmo.starVis * (0.4 + 0.6 * Math.sin(t * 2 + i));
         ctx.fillStyle = "#fff";
         ctx.fillRect(x, y, s, s);
       }
       ctx.globalAlpha = 1;
     }
-    if (pid === "southcross" && night > 0.5) {
+    if (atmo.aurora > 0.01) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       for (let k = 0; k < 3; k++) {
@@ -109,7 +134,7 @@ export class PortScene {
           const gg = ctx.createLinearGradient(0, y, 0, y + hh);
           const c = k === 1 ? "150,90,255" : "70,255,160";
           gg.addColorStop(0, `rgba(${c},0)`);
-          gg.addColorStop(0.7, `rgba(${c},${(0.08 * night).toFixed(3)})`);
+          gg.addColorStop(0.7, `rgba(${c},${(0.12 * atmo.aurora).toFixed(3)})`);
           gg.addColorStop(1, `rgba(${c},0)`);
           ctx.fillStyle = gg;
           ctx.fillRect(x, y, 8, hh);
@@ -117,37 +142,47 @@ export class PortScene {
       }
       ctx.restore();
     }
-    // солнце / луна
-    if (sunElev > -0.05) {
-      const sx = W * (0.08 + 0.84 * clamp(sunA, 0, 1)), sy = hY - sunElev * H * 0.4;
-      const gl = ctx.createRadialGradient(sx, sy, 0, sx, sy, H * 0.35);
-      gl.addColorStop(0, hexA(mix("#fff2d0", "#ffa860", golden), 0.5 * (1 - tAmt)));
+    // солнце и луна следуют астрономическим координатам атмосферы
+    if (sunElev > -1) {
+      const gl = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, H * 0.35);
+      gl.addColorStop(0, hexA(rgbHex(atmo.palette.glow), 0.5 * atmo.sunVis));
       gl.addColorStop(1, "rgba(255,200,140,0)");
       ctx.fillStyle = gl;
       ctx.fillRect(0, 0, W, hY);
-      ctx.fillStyle = hexA(mix("#fffbee", "#ff9a50", golden), 1 - tAmt * 0.8);
+      ctx.fillStyle = hexA(rgbHex(atmo.palette.sun), atmo.sunVis);
       ctx.beginPath();
-      ctx.arc(sx, sy, H * 0.026, 0, Math.PI * 2);
+      ctx.arc(sunX, sunY, H * 0.026, 0, Math.PI * 2);
       ctx.fill();
-    } else if (tAmt < 0.5) {
-      ctx.fillStyle = "rgba(236,232,216,0.9)";
-      ctx.beginPath();
-      ctx.arc(W * 0.78, H * 0.12, H * 0.02, 0, Math.PI * 2);
-      ctx.fill();
-      glow(ctx, W * 0.78, H * 0.12, H * 0.012, "#c8d8ff", 0.3);
     }
+    if (atmo.moonElev > -1 && atmo.moonVis > 0.02) {
+      const r = H * 0.02;
+      ctx.save();
+      ctx.globalAlpha = atmo.moonVis;
+      ctx.fillStyle = "#e7e9e4";
+      ctx.beginPath();
+      ctx.arc(moonX, moonY, r, 0, Math.PI * 2);
+      ctx.fill();
+      const k = Math.cos(atmo.moonPhase * Math.PI * 2);
+      ctx.fillStyle = "rgba(55,62,82,0.8)";
+      ctx.beginPath();
+      ctx.ellipse(moonX + (atmo.moonPhase < 0.5 ? 1 : -1) * k * r, moonY, Math.abs(k) * r, r, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      glow(ctx, moonX, moonY, r * 5, "#c8d8ff", 0.18 * atmo.moonVis * atmo.moonIllum);
+    }
+    if (fxCalls.length) drawEventFx(fxScene(), "sky", fxCalls);
     const dim = (c: string, k = 0.75) => mix(c, "#060a12", night * k);
     // облака
     {
-      const cover = { clear: 0.35, cloudy: 0.85, rain: 1, storm: 1, fog: 0.5, snow: 0.9 }[weather];
-      let lit = mix("#f6f8fa", "#ffc488", golden * 0.8);
-      if (weather === "rain" || weather === "storm") lit = mix(lit, "#6a7078", 0.6);
+      const cover = atmo.cover;
+      let lit = mix(rgbHex(atmo.palette.cloud), "#ffc488", golden * 0.3);
+      if (atmo.dark > 0.25) lit = mix(lit, "#6a7078", atmo.dark * 0.55);
       lit = mix(lit, "#1a2030", night * 0.88);
       const shade = mix(lit, top, 0.45);
       const n = Math.round(this.clouds.length * cover);
       for (let i = 0; i < n; i++) {
         const c = this.clouds[i];
-        c[0] += (c[3] + e.s.wind * 16) * dt;
+        c[0] += (c[3] + atmo.wind * 1.2 * atmo.windDir) * dt;
         if (c[0] - c[2] * 1.5 > W) c[0] = -c[2] * 1.6;
         const [cx, cy, cw] = c;
         for (let k = 0; k < 6; k++) {
@@ -166,14 +201,18 @@ export class PortScene {
 
     // ───── задний план ─────
     this.backdrop(ctx, pid, W, H, hY, quayY, sc, night, P, t, dim);
+    if (fxCalls.length) drawEventFx(fxScene(), "horizon", fxCalls);
 
     // ───── вода ─────
     const wg = ctx.createLinearGradient(0, hY, 0, H);
-    wg.addColorStop(0, dim(mix(P.water[0], hor, 0.35), 0.7));
-    wg.addColorStop(0.35, dim(P.water[0], 0.8));
-    wg.addColorStop(1, dim(P.water[1], 0.6));
+    const portNear = mix(P.water[0], rgbHex(atmo.palette.seaNear), 0.34);
+    const portDeep = mix(P.water[1], rgbHex(atmo.palette.deep), 0.28);
+    wg.addColorStop(0, dim(mix(portNear, hor, 0.35), 0.7));
+    wg.addColorStop(0.35, dim(portNear, 0.8));
+    wg.addColorStop(1, dim(portDeep, 0.6));
     ctx.fillStyle = wg;
     ctx.fillRect(0, hY, W, H - hY);
+    if (fxCalls.length) drawEventFx(fxScene(), "under", fxCalls);
     for (let i = 0; i < 44; i++) {
       const p = (i * 0.618) % 1;
       const y = hY + (H - hY) * p;
@@ -336,7 +375,6 @@ export class PortScene {
     }
 
     // ───── пришвартованные суда ─────
-    const dockX = W * L.dock;
     ctx.fillStyle = dim(P.quay);
     ctx.fillRect(dockX - 70 * sc, quayY - 2 * sc, 140 * sc, 5 * sc);
     for (const dx of [-60, -20, 20, 60]) {
@@ -344,11 +382,15 @@ export class PortScene {
       ctx.fillRect(dockX + dx * sc, quayY, 5 * sc, waterY - quayY + 30 * sc);
     }
     this.mooredBoats(ctx, pid, W, waterY, sc, night, t, dim);
-    const waveY = (x: number) => waterY + 4 * sc + Math.sin(x * 0.02 + t * 1.1) * 1.8 * sc + Math.sin(t * 0.7) * 1.2 * sc;
-    const f = { ctx, e, t, dt, night, sc: sc * 0.9, golden, weather, waveY, W, H } as unknown as Frame;
+    const f = { ctx, e, t, dt, night, sc: sc * 0.9, golden, weather, waveY, W, H, atmo, wind: Math.min(1.5, atmo.wind / 18) } as unknown as Frame;
+    if (atmo.ice > 0.02) drawIce(ctx, t, W, waveY, atmo.ice, atmo.wind * atmo.windDir * 26 * sc, sc, atmo.palette.seaNear);
     ctx.save();
-    drawBoat(f, dockX + 40 * sc, "moored");
+    fxRodTip = drawBoat(f, dockX + 40 * sc, "moored");
     ctx.restore();
+    if (fxCalls.length) {
+      drawEventFx(fxScene(), "surface", fxCalls);
+      drawEventFx(fxScene(), "front", fxCalls);
+    }
     this.hot.push({ id: "dock", x: dockX + 40 * sc, y: waterY - 80 * sc });
     // канат
     ctx.strokeStyle = dim("#c8b080");
@@ -359,7 +401,7 @@ export class PortScene {
     ctx.stroke();
 
     // ───── чайки ─────
-    if (night < 0.6 && weather !== "storm" && pid !== "southcross") {
+    if (night < 0.6 && atmo.wind < 18 && atmo.precip < 0.82 && pid !== "southcross") {
       ctx.strokeStyle = dim("#e8e8e4", 0.9);
       ctx.lineWidth = 1.6;
       for (const gg of this.gulls) {
@@ -382,7 +424,7 @@ export class PortScene {
     for (const p of this.smoke) {
       p.t += dt;
       p.y -= 14 * sc * dt;
-      p.x += (6 + e.s.wind * 20) * dt;
+      p.x += (6 + atmo.wind) * dt;
       p.r += 4 * sc * dt;
       ctx.fillStyle = `rgba(${night > 0.5 ? "80,86,96" : "220,220,224"},${(0.35 * (1 - p.t / 5)).toFixed(3)})`;
       ctx.beginPath();
@@ -392,31 +434,31 @@ export class PortScene {
     this.smoke = this.smoke.filter((p) => p.t < 5);
 
     // ───── погода ─────
-    if (weather === "rain" || weather === "storm") {
-      ctx.strokeStyle = "rgba(200,215,235,0.35)";
-      ctx.lineWidth = 1;
+    const q = 1 as 0 | 1 | 2;
+    const windPx = atmo.wind * atmo.windDir * 26 * sc;
+    const precip = { t, x0: 0, x1: W, top: 0, bottom: H, floor: () => H, wind: windPx, s: sc, q, near: false };
+    if (atmo.rain > 0.02) {
+      drawRain(ctx, { ...precip, intensity: atmo.rain, color: atmo.palette.cloud });
+      drawRain(ctx, { ...precip, near: true, intensity: atmo.rain, color: atmo.palette.cloud });
+    }
+    if (atmo.snow > 0.02) {
+      drawSnow(ctx, { ...precip, intensity: atmo.snow, color: [238, 245, 255] });
+      drawSnow(ctx, { ...precip, near: true, intensity: atmo.snow, color: [252, 254, 255] });
+    }
+    if (atmo.leaves > 0.02) drawLeaves(ctx, t, 0, W, 0, H, windPx, atmo.leaves, "leaf", sc);
+    if (atmo.petals > 0.02) drawLeaves(ctx, t, 0, W, 0, H, windPx * 0.6, atmo.petals, "petal", sc);
+    if (atmo.rainbow > 0.02 && sunElev > 0) {
+      ctx.save();
       ctx.beginPath();
-      for (let i = 0; i < 220; i++) {
-        const x = (hash1(i) * W + t * 180) % W, y = (hash1(i * 3) * H + t * 700) % H;
-        ctx.moveTo(x, y);
-        ctx.lineTo(x - 4, y - 14);
-      }
-      ctx.stroke();
+      ctx.rect(0, 0, W, hY);
+      ctx.clip();
+      ctx.globalCompositeOperation = "screen";
+      drawRainbow(ctx, W - sunX + W * 0.05, hY + H * 0.08, H * 0.4, atmo.rainbow * 0.68);
+      ctx.restore();
     }
-    if (weather === "snow") {
-      ctx.fillStyle = "rgba(255,255,255,0.85)";
-      for (const fl of this.flakes) {
-        fl[1] += dt * 40 * fl[2];
-        fl[0] += Math.sin(t + fl[2] * 5) * dt * 12;
-        if (fl[1] > H) fl[1] = -4;
-        ctx.beginPath();
-        ctx.arc(fl[0] % W, fl[1], fl[2], 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-    if (weather === "fog" || pid === "mirador") {
-      const fc = mix("#d8dee2", "#101820", night * 0.85);
-      const a = weather === "fog" ? 0.55 : 0.22;
+    const fogAmount = Math.max(atmo.fog, pid === "mirador" ? 0.22 : 0);
+    if (fogAmount > 0.04) {
+      const fc = mix(rgbHex(atmo.palette.fog), "#101820", night * 0.85);
       for (let k = 0; k < 5; k++) {
         const x = ((t * (6 + k * 2) + k * 300) % (W + 700)) - 350;
         const y = hY - 10 + k * 22 * sc;
@@ -424,7 +466,7 @@ export class PortScene {
         ctx.translate(x, y);
         ctx.scale(1, 0.12);
         const fg = ctx.createRadialGradient(0, 0, 0, 0, 0, 380);
-        fg.addColorStop(0, hexA(fc, a));
+        fg.addColorStop(0, hexA(fc, 0.16 + fogAmount * 0.45));
         fg.addColorStop(1, hexA(fc, 0));
         ctx.fillStyle = fg;
         ctx.beginPath();
@@ -432,6 +474,21 @@ export class PortScene {
         ctx.fill();
         ctx.restore();
       }
+    }
+    const strike = e.lastLightningStrike;
+    if (strike && strike.seed !== this.lastBoltSeed) {
+      this.lastBoltSeed = strike.seed;
+      const r = rng(strike.seed);
+      const x0 = W * strike.x;
+      this.lightningBolt = makeBolt(x0, 0, x0 + (r() - 0.5) * W * 0.12, hY, r);
+    }
+    if (e.lightning > 0.01) {
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      ctx.fillStyle = `rgba(230,235,255,${e.lightning * 0.24})`;
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
+      if (this.lightningBolt.length) drawBolt(ctx, this.lightningBolt, e.lightning, sc);
     }
     // виньетка
     const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.8);

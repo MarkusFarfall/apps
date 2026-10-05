@@ -1,16 +1,18 @@
-import { depthToU, JUMP_TIME, type Engine, type SonarBand } from "../engine";
+import { depthToU, JUMP_TIME, TIME_SCALE, type Engine, type SonarBand } from "../engine";
 import { FISH } from "../fish";
 import { drawFish, drawFishGlow, fishScreenLen } from "../fishDraw";
 import type { FishDef } from "../types";
-import { BAIT_BY_ID, WEATHER_INFO } from "../world";
+import { BAIT_BY_ID } from "../world";
 import { drawBoat } from "./boat";
 import type { Frame } from "./frame";
 import { drawBobberPointer, drawFightPanel, drawPower, drawRuler, drawSonar } from "./hud";
 import { LandRenderer } from "./land";
 import { AmbientLife } from "./ambient";
 import { SeabedRenderer } from "./seabed";
-import { CLOUD_COVER, SkyRenderer, skyAt, WEATHER_TINT } from "./sky";
-import { clamp, glow, hexA, mix, rng, smooth, af } from "./util";
+import { SkyRenderer } from "./sky";
+import { drawBolt, drawIce, drawLeaves, drawRain, drawRainRings, drawSnow, makeBolt, type Bolt } from "./weatherFx";
+import { drawEventFx, type FxCall, type FxScene, type Layer } from "./eventFx";
+import { clamp, glow, hexA, mix, rng, smooth, af, rgbHex } from "./util";
 import {
   drawDepthOverlay,
   drawSeaBand,
@@ -25,7 +27,6 @@ import {
 interface Ambient { f: FishDef; x: number; depth: number; dir: 1 | -1; speed: number; len: number; phase: number; known: boolean }
 interface Creature { kind: "jelly" | "turtle" | "crab"; x: number; y: number; vx: number; vy: number; s: number; phase: number; hue: string }
 interface Bubble { x: number; y: number; r: number; v: number }
-interface Drop { x: number; y: number; v: number; l: number }
 interface Spray { x: number; y: number; vx: number; vy: number; t: number }
 
 
@@ -52,8 +53,6 @@ export class Scene {
   private bubbles: Bubble[] = [];
   private sprays: Spray[] = [];
   private rings: Ring[] = [];
-  private drops: Drop[] = [];
-  private flakes: Drop[] = [];
   private snow: [number, number, number][] = [];
   private spawnT = 0;
   private creatureT = 0;
@@ -62,8 +61,8 @@ export class Scene {
   private H = 0;
   private initQuality = -1;
   private spotKey = "";
-  private bolt: [number, number][] = [];
-  private lastLightning = 0;
+  private bolt: Bolt = [];
+  private lastBoltSeed = -1;
   private sonar: SonarBand[] = [];
   private sonarT = 0;
   private whaleX = -500;
@@ -74,12 +73,38 @@ export class Scene {
     this.H = H;
     this.initQuality = this.quality;
     const r = rng(9);
-    const rainN = this.quality >= 2 ? 520 : this.quality === 1 ? 320 : 160;
-    const flakeN = this.quality >= 2 ? 280 : this.quality === 1 ? 170 : 90;
     const snowN = this.quality >= 2 ? 130 : this.quality === 1 ? 80 : 45;
-    this.drops = Array.from({ length: rainN }, () => ({ x: r() * W, y: r() * H, v: 750 + r() * 500, l: 10 + r() * 18 }));
-    this.flakes = Array.from({ length: flakeN }, () => ({ x: r() * W, y: r() * H, v: 30 + r() * 50, l: 0.8 + r() * 2.4 }));
     this.snow = Array.from({ length: snowN }, () => [r() * W, r() * 3000, 0.5 + r() * 1.6]);
+  }
+
+  private eventFxCalls(e: Engine): FxCall[] {
+    const visible = new Map(e.eventDirector.visible().map((event) => [event.uid, event]));
+    const calls: FxCall[] = [];
+    for (const { live, def } of e.eventDirector.activeList()) {
+      const event = visible.get(live.uid);
+      if (!event || !def.fx?.length) continue;
+      const age = Math.max(0, (e.s.minutes - live.start) / TIME_SCALE);
+      for (const spec of def.fx) calls.push({ e: event, spec, age });
+    }
+    return calls;
+  }
+
+  private fxScene(f: Frame, boatX: number, rodTip?: readonly [number, number]): FxScene {
+    const { ctx, W, H, sc, hY, sY, cam, t, atmo } = f;
+    const mast: readonly [number, number] = [boatX - 15 * sc, f.waveY(boatX) - 30 * sc];
+    const tip: readonly [number, number] = rodTip ?? [boatX + 70 * sc, f.waveY(boatX) - 50 * sc];
+    const rocks = this.land.seaRocks.slice(0, 8).map((rock) => [rock.x, rock.y - rock.h] as [number, number]);
+    return {
+      c: ctx, t, W, H, s: sc, q: Math.max(0, Math.min(2, this.quality)) as 0 | 1 | 2,
+      horizon: hY, surface: sY, seabed: sY + f.depthPx(f.spot.maxDepth), visW: W, cam,
+      windPx: atmo.wind * atmo.windDir * 26 * sc,
+      sAt: f.waveY,
+      glow: (x, y, r, col, a) => glow(ctx, x, y, r, rgbHex(col), a),
+      sun: { x: f.sunX, y: f.sunY }, moon: { x: f.moonX, y: f.moonY },
+      rocks, capeX: W * (f.loc.land === "cliffs" ? 0.82 : 0.72), capeTop: hY,
+      rodTip: tip, mast, lantern: [boatX - 20 * sc, f.waveY(boatX) - 20 * sc], boatX,
+      A: atmo, pal: atmo.palette,
+    };
   }
 
   render(ctx: CanvasRenderingContext2D, e: Engine, W: number, H: number, dt: number) {
@@ -94,17 +119,13 @@ export class Scene {
       this.schools = [];
       this.sonarT = 0;
     }
-    const hour = e.hour;
-    const weather = e.s.weather;
-    const winfo = WEATHER_INFO[weather];
-    const cover = CLOUD_COVER[weather];
-    const fogK = weather === "fog" ? 1 : weather === "snow" ? 0.35 : weather === "rain" ? 0.25 : weather === "storm" ? 0.3 : 0;
-
-    const sunA = (hour - 5.4) / 14.8;
-    const sunElev = Math.sin(clamp(sunA, -0.1, 1.1) * Math.PI);
-    const day = clamp(sunElev * 1.6, 0, 1) * (1 - WEATHER_TINT[weather][1] * 0.45);
-    const night = 1 - clamp(sunElev * 3 + 0.12, 0, 1);
-    const golden = clamp(1 - Math.abs(sunElev - 0.1) / 0.22, 0, 1) * (1 - cover * 0.5);
+    const atmo = e.atmosphere.state;
+    const weather = e.weather;
+    const cover = atmo.cover;
+    const fogK = atmo.fog;
+    const day = atmo.daylight;
+    const night = atmo.night;
+    const golden = atmo.golden;
 
     const sY = H * 0.46;
     const hY = sY - H * 0.095;
@@ -112,21 +133,19 @@ export class Scene {
     const sc = clamp(Math.min(H / 900, W / 1150), 0.5, 1.25);
     const compact = W < 820 || H < 560, land = W >= H;
     const calm = e.activeEvents.some((a) => a.id === "calm");
-    const amp = (3.2 * winfo.wave * loc.waveMult * (spot.swell ?? 1) * (calm ? 0.25 : 1) + 1) * sc;
+    const amp = (3.2 * atmo.waves * loc.waveMult * (spot.swell ?? 1) * (calm ? 0.25 : 1) + 1) * sc;
 
-    const [top0, mid0, hor0] = skyAt(hour);
-    const [tint, tAmt] = WEATHER_TINT[weather];
-    const tintC = mix(tint, "#05080f", night * 0.85);
-    const top = mix(top0, tintC, tAmt), mid = mix(mid0, tintC, tAmt), hor = mix(hor0, tintC, tAmt * 0.85);
-
-    const sunX = W * (0.08 + 0.84 * clamp(sunA, -0.05, 1.05));
-    const sunY = hY - sunElev * H * 0.34;
-    const sunVis = clamp(1 - cover * 0.85, 0.05, 1) * (1 - fogK * 0.6) * clamp((sunElev + 0.08) * 5, 0, 1);
-    const mh = (hour - 19.2 + 24) % 24;
-    const moonUp = mh < 11;
-    const ma = mh / 11;
-    const moonX = W * (0.9 - 0.8 * ma), moonY = hY - Math.sin(ma * Math.PI) * H * 0.3;
-    const moonVis = (1 - cover * 0.75) * clamp(night * 1.4, 0.12, 1) * (1 - fogK * 0.5);
+    const top = rgbHex(atmo.palette.skyTop);
+    const mid = rgbHex(atmo.palette.skyMid);
+    const hor = rgbHex(atmo.palette.skyHor);
+    const sunElev = atmo.sunElev;
+    const sunX = W * clamp((atmo.sunAz - 45) / 270, 0, 1);
+    const sunY = hY - Math.sin((sunElev * Math.PI) / 180) * H * 0.34;
+    const sunVis = atmo.sunVis;
+    const moonX = W * clamp((atmo.moonAz - 45) / 270, 0, 1);
+    const moonY = hY - Math.sin((atmo.moonElev * Math.PI) / 180) * H * 0.3;
+    const moonUp = atmo.moonElev > -1;
+    const moonVis = atmo.moonVis;
 
     if (this.voyage) this.flow += this.voyage * dt;
     const fl = this.flow;
@@ -164,9 +183,14 @@ export class Scene {
     const cam = this.camY;
 
     const f: Frame = {
-      ctx, e, loc, spot, weather, W, H, t, dt, sY, hY, cam, K, sc, night, day, golden, cover, fogK, top, mid, hor,
-      sunX, sunY, sunElev, sunVis, moonX, moonY, moonUp, moonVis, amp, wind: this.voyage ? Math.min(3, e.s.wind + this.voyage / 90) : e.s.wind, clarity: loc.clarity ?? 0.6, quality: this.quality, compact, land, topRes: compact ? (land ? 64 : 118) : 210, botRes: compact ? (land ? 70 : 146) : 150, depthPx, waveY,
+      ctx, e, loc, spot, weather, atmo, W, H, t, dt, sY, hY, cam, K, sc, night, day, golden, cover, fogK, top, mid, hor,
+      sunX, sunY, sunElev, sunVis, moonX, moonY, moonUp, moonVis, amp,
+      wind: this.voyage ? Math.min(3, atmo.wind / 18 + this.voyage / 90) : Math.min(1.5, atmo.wind / 18),
+      clarity: loc.clarity ?? 0.6, quality: this.quality, compact, land,
+      topRes: compact ? (land ? 64 : 118) : 210, botRes: compact ? (land ? 70 : 146) : 150, depthPx, waveY,
     };
+    const fxCalls = this.eventFxCalls(e);
+    const fxBoatX = W * 0.3;
 
     const shake = e.shake * 4;
     ctx.save();
@@ -176,10 +200,13 @@ export class Scene {
     // ───── НАД ВОДОЙ ─────
     if (cam < sY + 30) {
       this.sky.draw(f);
+      if (fxCalls.length) drawEventFx(this.fxScene(f, fxBoatX), "sky", fxCalls);
       this.life.update(f);
       this.life.drawSky(f);
       this.land.drawAbove(f);
+      if (fxCalls.length) drawEventFx(this.fxScene(f, fxBoatX), "horizon", fxCalls);
       drawSeaBand(f, () => { if (this.quality > 0) this.land.drawReflection(f, seaSurfaceColor(f)); });
+      if (fxCalls.length) drawEventFx(this.fxScene(f, fxBoatX), "surface", fxCalls);
       this.land.drawSea(f);
       if (!this.voyage) this.life.drawSea(f);
       this.land.drawDivers(f);
@@ -188,6 +215,7 @@ export class Scene {
 
     // ───── ПОД ВОДОЙ ─────
     drawUnderwaterBody(f);
+    if (fxCalls.length) drawEventFx(this.fxScene(f, fxBoatX), "under", fxCalls);
     this.bed.draw(f);
     this.drawWhale(f);
     this.updateSchools(f);
@@ -224,17 +252,17 @@ export class Scene {
     const bx = W * 0.3;
     if (this.voyage) this.drawWake(f, bx);
     const tip = drawBoat(f, bx, this.voyage ? "helm" : "fish");
-    if ((weather === "rain" || weather === "storm") && cam < sY + 40) {
-      const n = weather === "storm" ? 40 : 18;
-      for (let i = 0; i < n * dt * 10; i++) this.rings.push({ x: Math.random() * W, t: 0, s: 0.6 + Math.random() * 0.8 });
-    }
-    this.rings = this.rings.filter((r) => r.t < 0.7);
     drawSurfaceFront(f, this.rings);
+    this.rings = this.rings.filter((r) => r.t < 0.7);
+    if (atmo.ice > 0.02) {
+      drawIce(ctx, t, W, (x) => waveY(x), atmo.ice, atmo.wind * atmo.windDir * 26 * sc, sc, atmo.palette.seaNear);
+    }
     if (!this.voyage) {
       this.drawJump(f, bobX);
       this.drawLine(f, tip, bobX, hookY, fishPos);
     }
     this.drawSprays(f);
+    if (fxCalls.length) drawEventFx(this.fxScene(f, bx, tip), "front", fxCalls);
 
     if (!this.voyage && (e.phase === "idle" || e.phase === "charging")) {
       const dy = sY + depthPx(Math.min(e.s.targetDepth, e.maxDepth));
@@ -590,7 +618,7 @@ export class Scene {
           fi.depth[1] >= dTop &&
           fi.depth[0] <= dBot &&
           (fi.time === "any" || fi.time === tod) &&
-          (!fi.weather || fi.weather.includes(e.s.weather)) &&
+          (!fi.weather || fi.weather.includes(e.weather)) &&
           (!fi.season || fi.season.includes(e.season)),
       );
       if (pool.length) {
@@ -884,56 +912,47 @@ export class Scene {
   }
 
   private drawWeather(f: Frame) {
-    const { ctx, W, H, sY, cam, weather, night, t, e } = f;
+    const { ctx, W, H, sY, cam, t, atmo, sc } = f;
     const surf = sY - cam;
+    const q = clamp(Math.round(f.quality), 0, 2) as 0 | 1 | 2;
+    const windPx = atmo.wind * atmo.windDir * 26 * sc;
     if (surf > 0) {
+      const bottom = Math.min(H, surf + 32 * sc);
+      const opts = {
+        t, x0: 0, x1: W, top: 0, bottom,
+        floor: (x: number) => f.waveY(x) - cam,
+        wind: windPx, s: sc, q, near: false,
+      };
       ctx.save();
       ctx.beginPath();
-      ctx.rect(0, 0, W, surf + 4);
+      ctx.rect(0, 0, W, Math.min(H, surf + 6));
       ctx.clip();
-      if (weather === "rain" || weather === "storm") {
-        const n = Math.min(this.drops.length, weather === "storm" ? 520 : 280);
-        const wind = e.s.wind * 0.6 + 0.15;
-        ctx.strokeStyle = night > 0.5 ? "rgba(170,190,220,0.35)" : "rgba(210,225,240,0.42)";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        for (let i = 0; i < n; i++) {
-          const d = this.drops[i];
-          d.y += d.v * f.dt;
-          d.x += d.v * wind * f.dt;
-          if (d.y > H) { d.y = -20; d.x = Math.random() * W * 1.2 - W * 0.2; }
-          if (d.x > W) d.x -= W;
-          ctx.moveTo(d.x, d.y);
-          ctx.lineTo(d.x - d.l * wind, d.y - d.l);
-        }
-        ctx.stroke();
+      if (atmo.rain > 0.02) {
+        const color = atmo.palette.cloud;
+        drawRain(ctx, { ...opts, intensity: atmo.rain, color });
+        drawRain(ctx, { ...opts, near: true, intensity: atmo.rain, color });
       }
-      if (weather === "snow") {
-        ctx.fillStyle = "rgba(255,255,255,0.88)";
-        for (const fl of this.flakes) {
-          fl.y += fl.v * f.dt;
-          fl.x += (Math.sin(t + fl.l * 10) * 20 + e.s.wind * 40) * f.dt;
-          if (fl.y > H) { fl.y = -5; fl.x = Math.random() * W; }
-          if (fl.x > W) fl.x -= W;
-          ctx.beginPath();
-          ctx.arc(fl.x, fl.y, fl.l, 0, Math.PI * 2);
-          ctx.fill();
-        }
+      if (atmo.snow > 0.02) {
+        drawSnow(ctx, { ...opts, intensity: atmo.snow, color: [245, 249, 255] });
+        drawSnow(ctx, { ...opts, near: true, intensity: atmo.snow, color: [252, 254, 255] });
       }
       ctx.restore();
+      if (atmo.rain > 0.02) drawRainRings(ctx, t, 0, W, (x) => f.waveY(x) - cam, atmo.rain, sc, q);
+      if (atmo.leaves > 0.02 && surf > 8) drawLeaves(ctx, t, 0, W, 0, Math.min(H, surf), windPx, atmo.leaves, "leaf", sc);
+      if (atmo.petals > 0.02 && surf > 8) drawLeaves(ctx, t, 0, W, 0, Math.min(H, surf), windPx * 0.6, atmo.petals, "petal", sc);
     }
-    if (f.fogK > 0.5) {
-      const fy = sY - cam;
-      const fc = mix("#c8d0d4", "#101820", night * 0.85);
+    if (f.fogK > 0.04) {
+      const fy = surf;
+      const fc = rgbHex(atmo.palette.fog);
       const fg = ctx.createLinearGradient(0, fy - H * 0.4, 0, fy + H * 0.08);
       fg.addColorStop(0, hexA(fc, 0));
-      fg.addColorStop(0.65, hexA(fc, 0.7));
+      fg.addColorStop(0.65, hexA(fc, 0.24 + f.fogK * 0.5));
       fg.addColorStop(1, hexA(fc, 0));
       ctx.fillStyle = fg;
       ctx.fillRect(0, 0, W, H);
       for (let i = 0; i < 6; i++) {
         const x = ((t * (8 + i * 3) + i * 300) % (W + 700)) - 350;
-        ctx.fillStyle = hexA(fc, 0.12);
+        ctx.fillStyle = hexA(fc, 0.08 + f.fogK * 0.11);
         ctx.beginPath();
         ctx.ellipse(x, fy - 30 - i * 26, 320, 30, 0, 0, Math.PI * 2);
         ctx.fill();
@@ -942,31 +961,22 @@ export class Scene {
   }
 
   private drawLightning(f: Frame) {
-    const { ctx, e, W, H, sY, cam } = f;
-    if (e.lightning > this.lastLightning + 0.5) {
-      const x0 = W * (0.2 + Math.random() * 0.7);
-      this.bolt = [[x0, 0]];
-      let x = x0;
-      for (let y = 0; y < (sY - cam) * 0.8; y += 16) {
-        x += (Math.random() - 0.5) * 38;
-        this.bolt.push([x, y]);
-      }
+    const { ctx, e, W, H, sY, cam, sc } = f;
+    const strike = e.lastLightningStrike;
+    if (strike && strike.seed !== this.lastBoltSeed) {
+      this.lastBoltSeed = strike.seed;
+      const r = rng(strike.seed);
+      const x0 = W * strike.x;
+      const surface = Math.max(0, sY - cam);
+      this.bolt = makeBolt(x0, 0, x0 + (r() - 0.5) * W * 0.12, surface, r);
     }
-    this.lastLightning = e.lightning;
-    if (e.lightning <= 0) return;
-    ctx.fillStyle = `rgba(230,235,255,${e.lightning * 0.35})`;
+    if (e.lightning <= 0.01) return;
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.fillStyle = `rgba(230,235,255,${e.lightning * 0.28})`;
     ctx.fillRect(0, 0, W, H);
-    if (e.lightning > 0.55 && this.bolt.length && sY - cam > 0) {
-      ctx.save();
-      ctx.strokeStyle = `rgba(255,255,255,${e.lightning})`;
-      ctx.lineWidth = 2.5;
-      ctx.shadowColor = "#b0c0ff";
-      ctx.shadowBlur = 22;
-      ctx.beginPath();
-      this.bolt.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-      ctx.stroke();
-      ctx.restore();
-    }
+    ctx.restore();
+    if (this.bolt.length && sY - cam > 0) drawBolt(ctx, this.bolt, e.lightning, sc);
   }
 
   private grade(f: Frame) {
@@ -985,7 +995,7 @@ export class Scene {
     ctx.restore();
     // блики объектива
     const sx = f.sunX, sy = f.sunY - cam;
-    if (this.quality > 1 && f.sunVis > 0.55 && sy > 0 && sy < sY - cam && f.sunElev > 0.05) {
+    if (this.quality > 1 && f.sunVis > 0.55 && sy > 0 && sy < sY - cam && f.sunElev > 0) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       const cx = W / 2, cy = H / 2;

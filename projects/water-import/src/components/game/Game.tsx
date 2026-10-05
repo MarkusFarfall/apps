@@ -12,8 +12,10 @@ import { CAM_MODES, Scene, type CamMode } from "@/game/render/scene";
 import { PortScene, type Building } from "@/game/render/port";
 import { installCanvasGuards, setFonts } from "@/game/render/util";
 import type { BaitId, SaveData } from "@/game/types";
-import { BAITS, EVENT_BY_ID, PORT_BY_ID, SEASONS, WEATHER_INFO, spotsOf } from "@/game/world";
-import { BaitIcon, EVENT_ICON, Icon, MoonIcon, WEATHER_ICON } from "./Icons";
+import { BAITS, PORT_BY_ID, SEASONS, WEATHER_INFO, spotsOf } from "@/game/world";
+import { BaitIcon, Icon, MoonIcon, WEATHER_ICON } from "./Icons";
+import { EventFeed } from "./EventFeed";
+import { EventsModal } from "./EventsModal";
 import { DailyTracker, FindModal, JournalModal, LetterModal, QuestTracker, XpBar, type Settings } from "./Journal";
 import { CatchModal, CodexModal, fmt, PortModal, type PortTab } from "./Panels";
 import { TravelChoice, TravelOverlay } from "./Travel";
@@ -22,7 +24,6 @@ import { RestTransition } from "./RestTransition";
 import { FriendsModal, useFriends } from "./Friends";
 
 const CAM_NAMES: Record<CamMode, string> = { auto: "авто", surface: "поверхность", hook: "за снастью", bottom: "дно" };
-const MOON_NAMES = ["Новолуние", "Молодая луна", "Первая четверть", "Прибывающая", "Полнолуние", "Убывающая", "Последняя четверть", "Старая луна"];
 const SETTINGS_KEY = "zv_settings";
 const DEFAULT_SETTINGS: Settings = { quality: 2, sound: true, music: true, volume: 0.8 };
 
@@ -42,7 +43,7 @@ export default function Game() {
   const [boot, setBoot] = useState<Boot>({ state: "loading" });
   const [playing, setPlaying] = useState(false);
   const [resting, setResting] = useState(false);
-  const [panel, setPanel] = useState<null | "codex" | "port" | "journal" | "friends">(null);
+  const [panel, setPanel] = useState<null | "codex" | "port" | "journal" | "friends" | "events">(null);
   const [letter, setLetter] = useState<number | null>(null);
   const [tripReq, setTripReq] = useState<Trip | null>(null);
   const [travelling, setTravelling] = useState<{ trip: Trip; mode: TravelMode } | null>(null);
@@ -380,6 +381,10 @@ export default function Game() {
         // генерировать звук за кадром. SFX сбрасываются только в активной игре.
         if (playing && a.ready) {
           try {
+            while (e.lightningEvents.length) {
+              const strike = e.lightningEvents.shift()!;
+              a.thunder(strike.dist, strike.power);
+            }
             while (e.sfx.length) a.play(e.sfx.shift()!);
             const under = Math.max(0, Math.min(1, (scene.camY - H * 0.05) / (H * 0.35)));
             a.update(e, dt, under);
@@ -388,10 +393,15 @@ export default function Game() {
             if (audioFails.current === 1) console.warn("[audio] сбой звука, кадр продолжается", err);
             if (audioFails.current === 30) { a.setEnabled(false); console.warn("[audio] звук отключён после 30 сбоев"); }
             e.sfx.length = 0;
+            e.lightningEvents.length = 0;
           }
-        } else e.sfx.length = 0;
+        } else {
+          e.sfx.length = 0;
+          e.lightningEvents.length = 0;
+        }
       } else {
         e.sfx.length = 0;
+        e.lightningEvents.length = 0;
       }
       raf = requestAnimationFrame(loop);
     };
@@ -406,7 +416,7 @@ export default function Game() {
     audioRef.current.setMuffled(playing && (panel !== null || letter !== null || authOpen !== null));
   }, [engine, playing, panel, letter, authOpen, travelling, tripReq, engine.s.atPort, boot.state]);
 
-  const openPanel = useCallback((p: "codex" | "journal" | "friends") => {
+  const openPanel = useCallback((p: "codex" | "journal" | "friends" | "events") => {
     audioRef.current.ui("open");
     setPanel((cur) => (cur === p ? null : cur === "port" ? cur : p));
   }, []);
@@ -457,6 +467,7 @@ export default function Game() {
       else if (ev.code === "KeyC") openPanel("codex");
       else if (ev.code === "KeyJ") openPanel("journal");
       else if (ev.code === "KeyF") openPanel("friends");
+      else if (ev.code === "KeyE") openPanel("events");
       else if (ev.code === "KeyP" && !panel) openPort();
       else if (ev.code === "KeyV" && !panel) cycleCam();
       else if (ev.code === "KeyM") setSettings({ ...settings, sound: !settings.sound });
@@ -531,10 +542,12 @@ export default function Game() {
   const hh = String(Math.floor(engine.hour)).padStart(2, "0");
   // Показываем реальные игровые минуты, а не округление к десятиминутным делениям.
   const mm = String(Math.floor(engine.s.minutes % 60)).padStart(2, "0");
-  const w = WEATHER_INFO[s.weather];
+  const w = WEATHER_INFO[engine.weather];
+  const atmo = engine.atmosphere.summary();
+  const moonPhase = Math.round(engine.atmosphere.state.moonPhase * 8) % 8;
   const fc = engine.forecast;
   const busy = engine.phase === "fight" || engine.phase === "bite" || engine.phase === "caught";
-  const events = engine.activeEvents.filter((e) => e.id !== "bottle");
+  const events = engine.eventDirector.activeList();
 
   const status: Record<string, [string, string]> = {
     idle: engine.coolerFull ? ["Садок полон", "Вернитесь в порт"] : ["Готов к забросу", "Удерживайте ЛКМ или пробел"],
@@ -611,7 +624,7 @@ export default function Game() {
             )}
           </div>
           <div className="absolute bottom-6 left-[7vw] right-6 hidden flex-wrap gap-x-6 gap-y-1 text-[11px] dim md:flex">
-            <span>ЛКМ / Пробел — заброс и подмотка</span><span>A · D — против рывка</span><span>Колесо — глубина</span><span>C · J · P — кодекс, журнал, порт</span>
+            <span>ЛКМ / Пробел — заброс и подмотка</span><span>A · D — против рывка</span><span>Колесо — глубина</span><span>C · J · E · P — кодекс, журнал, явления, порт</span>
           </div>
         </div>
       )}
@@ -622,7 +635,7 @@ export default function Game() {
       {panel === "friends" && <FriendsModal state={friends} me={account.user?.id ?? null} onClose={closePanel} onUi={(k) => audioRef.current.ui(k ?? "click")} />}
 
       {playing && engine.s.atPort && !travelling && (
-        <PortHub engine={engine} hot={portScene0.hot} compact={view.compact} onOpen={openBuilding} onTravel={requestTrip} onJournal={() => openPanel("journal")} onCodex={() => openPanel("codex")} account={account} onAccount={() => setAuthOpen("profile")} />
+        <PortHub engine={engine} hot={portScene0.hot} compact={view.compact} onOpen={openBuilding} onTravel={requestTrip} onJournal={() => openPanel("journal")} onCodex={() => openPanel("codex")} onEvents={() => openPanel("events")} account={account} onAccount={() => setAuthOpen("profile")} />
       )}
       {tripReq && <TravelChoice engine={engine} trip={tripReq} onCancel={() => setTripReq(null)} onGo={startTrip} />}
       {travelling && <TravelOverlay engine={engine} trip={travelling.trip} mode={travelling.mode} onDone={finishTrip} quality={settings.quality} />}
@@ -645,12 +658,12 @@ export default function Game() {
               </div>
               <div className="rule my-2.5" />
               <div className="flex items-center justify-between text-[12px] text-[#ddd7ca]">
-                <span className="flex items-center gap-1.5" title={w.desc}><Icon name={WEATHER_ICON[s.weather]} size={15} className="text-[var(--brass)]" />{w.name}</span>
-                <span className="num flex items-center gap-1"><Icon name="thermo" size={14} className="opacity-60" />{engine.temperature > 0 ? "+" : ""}{engine.temperature}°</span>
-                <span className="num flex items-center gap-1"><Icon name="wind" size={14} className="opacity-60" />{Math.round(s.wind * 14)} м/с</span>
-                <span title={MOON_NAMES[engine.moonIndex]}><MoonIcon phase={engine.moonIndex} size={16} /></span>
+                <span className="flex items-center gap-1.5" title={w.desc}><Icon name={WEATHER_ICON[engine.weather]} size={15} className="text-[var(--brass)]" />{atmo.weatherName}</span>
+                <span className="num flex items-center gap-1"><Icon name="thermo" size={14} className="opacity-60" />{atmo.temp > 0 ? "+" : ""}{atmo.temp}°</span>
+                <span className="num flex items-center gap-1"><Icon name="wind" size={14} className="opacity-60" />{atmo.wind} м/с</span>
+                <span title={atmo.moonName}><MoonIcon phase={moonPhase} size={16} /></span>
               </div>
-              <div className="mt-1.5 text-[11px] dim">Далее — {WEATHER_INFO[fc.w].name.toLowerCase()}, через ~{Math.max(1, Math.round(fc.inMin / 60))} ч</div>
+              <div className="mt-1.5 text-[11px] dim">{atmo.phaseName} · облачность {atmo.cover}% · далее {WEATHER_INFO[fc.w].name.toLowerCase()}, через ~{Math.max(1, Math.round(fc.inMin / 60))} ч</div>
               <div className="mt-3 border-t border-[var(--line)] pt-2" onPointerDown={(e) => e.stopPropagation()}>
                 {spotsOf(s.location).map((sp) => {
                   const on = s.spot === sp.id;
@@ -666,15 +679,15 @@ export default function Game() {
             </div>
             <div onPointerDown={(e) => e.stopPropagation()}><QuestTracker engine={engine} onOpen={openLetter} /></div>
             <div onPointerDown={(e) => e.stopPropagation()}><DailyTracker engine={engine} onOpen={() => openPanel("journal")} /></div>
-            {events.map((ev) => {
-              const d = EVENT_BY_ID[ev.id];
-              const left = Math.max(0, (ev.endsAt - s.minutes) / 60);
+            {events.map((entry) => {
+              const omen = entry.live.phase === "omen";
+              const left = Math.max(0, entry.left);
               return (
-                <div key={ev.id} className="glass flex items-center gap-3 px-4 py-2.5">
-                  <Icon name={EVENT_ICON[ev.id] ?? "sparkle"} size={16} className="text-[var(--brass)]" />
-                  <span className="flex-1 text-[12px] text-[#ece6d8]">{d.name}</span>
-                  <span className="num text-[11px] dim">{left >= 1 ? `${left.toFixed(1)} ч` : `${Math.round(left * 60)} мин`}</span>
-                </div>
+                <button key={entry.live.uid} onClick={() => openPanel("events")} className="glass flex items-center gap-3 px-4 py-2.5 text-left">
+                  <span className="text-base">{omen ? "❔" : entry.def.icon}</span>
+                  <span className="flex-1 text-[12px] text-[#ece6d8]">{omen ? `Предвестие: ${entry.def.name}` : entry.def.name}</span>
+                  <span className="num text-[11px] dim">{Math.ceil(left)} мин</span>
+                </button>
               );
             })}
           </div>
@@ -696,6 +709,7 @@ export default function Game() {
               <button className="iconbtn" onClick={() => setSettings({ ...settings, sound: !settings.sound })} title="Звук [M]"><Icon name={settings.sound ? "speaker" : "mute"} size={16} /></button>
               <AccountBadge account={account} compact onClick={() => setAuthOpen("profile")} />
               <button className="iconbtn" onClick={() => openPanel("journal")} title="Журнал [J]"><Icon name="journal" size={16} />{(engine.perkPoints > 0 || engine.hasLetter || engine.daily.tasks.some((t) => t.done && !t.claimed)) && <span className="dot" />}</button>
+              <button className="iconbtn" onClick={() => openPanel("events")} title="Явления [E]"><Icon name="sparkle" size={16} />{events.length > 0 && <span className="dot" />}</button>
               <button className="iconbtn" onClick={() => openPanel("codex")} title="Кодекс [C]"><Icon name="book" size={16} /></button>
               <button className="iconbtn" onClick={() => openPanel("friends")} title="Друзья [F]"><Icon name="friends" size={16} />{friends.pending > 0 && <span className="dot" />}</button>
               <button className="iconbtn" onClick={openPort} title={`В порт ${PORT_BY_ID[engine.nearestPort()].name} [P]`}><Icon name="anchor" size={16} /><span className="normal-case tracking-normal">{PORT_BY_ID[engine.nearestPort()].name}</span></button>
@@ -714,7 +728,7 @@ export default function Game() {
                     <span className="block truncate text-[12px] leading-tight text-[#f1ebdd]">{engine.spot.name}</span>
                     <span className="block truncate text-[10px] leading-tight dim">{engine.loc.name}</span>
                   </span>
-                  <Icon name={WEATHER_ICON[s.weather]} size={16} className="shrink-0 text-[var(--brass)]" />
+                  <Icon name={WEATHER_ICON[engine.weather]} size={16} className="shrink-0 text-[var(--brass)]" />
                   <span className="num hidden shrink-0 text-[11px] muted min-[420px]:inline">{engine.temperature > 0 ? "+" : ""}{engine.temperature}°</span>
                   {(events.length > 0 || engine.hasLetter) && <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--brass)] shadow-[0_0_6px_var(--brass)]" />}
                 </button>
@@ -722,6 +736,7 @@ export default function Game() {
                   <div className="flex gap-1.5">
                     <button className="iconbtn" onClick={cycleCam} aria-label="Камера"><Icon name="target" size={16} /></button>
                     <button className="iconbtn" onClick={() => openPanel("journal")} aria-label="Журнал"><Icon name="journal" size={16} />{(engine.perkPoints > 0 || engine.hasLetter || engine.daily.tasks.some((t) => t.done && !t.claimed)) && <span className="dot" />}</button>
+                    <button className="iconbtn" onClick={() => openPanel("events")} aria-label="Явления"><Icon name="sparkle" size={16} />{events.length > 0 && <span className="dot" />}</button>
                     <button className="iconbtn" onClick={() => openPanel("codex")} aria-label="Кодекс"><Icon name="book" size={16} /></button>
                     <button className="iconbtn" onClick={() => openPanel("friends")} aria-label="Друзья"><Icon name="friends" size={16} />{friends.pending > 0 && <span className="dot" />}</button>
                     <button className="iconbtn" onClick={openPort} aria-label="Порт"><Icon name="anchor" size={16} /></button>
@@ -741,11 +756,11 @@ export default function Game() {
                       <span className="text-[11px] dim">{SEASONS[engine.season]}, день {engine.dayOfSeason}/7 · год {engine.year}</span>
                     </div>
                     <div className="mt-2 flex items-center justify-between text-[12px] text-[#ddd7ca]">
-                      <span className="flex items-center gap-1.5"><Icon name={WEATHER_ICON[s.weather]} size={15} className="text-[var(--brass)]" />{w.name}</span>
-                      <span className="num flex items-center gap-1"><Icon name="wind" size={14} className="opacity-60" />{Math.round(s.wind * 14)} м/с</span>
-                      <span className="flex items-center gap-1.5"><MoonIcon phase={engine.moonIndex} size={15} />{MOON_NAMES[engine.moonIndex]}</span>
+                      <span className="flex items-center gap-1.5"><Icon name={WEATHER_ICON[engine.weather]} size={15} className="text-[var(--brass)]" />{atmo.weatherName}</span>
+                      <span className="num flex items-center gap-1"><Icon name="wind" size={14} className="opacity-60" />{atmo.wind} м/с</span>
+                      <span className="flex items-center gap-1.5"><MoonIcon phase={moonPhase} size={15} />{atmo.moonName}</span>
                     </div>
-                    <div className="mt-1 text-[11px] dim">{w.desc}. Далее — {WEATHER_INFO[fc.w].name.toLowerCase()}, через ~{Math.max(1, Math.round(fc.inMin / 60))} ч</div>
+                    <div className="mt-1 text-[11px] dim">{w.desc} · {atmo.phaseName}, облачность {atmo.cover}%. Далее — {WEATHER_INFO[fc.w].name.toLowerCase()}, через ~{Math.max(1, Math.round(fc.inMin / 60))} ч</div>
                     <div className="label mt-4">Точки ловли</div>
                     <div className="mt-1">
                       {spotsOf(s.location).map((sp) => {
@@ -762,12 +777,12 @@ export default function Game() {
                     {events.length > 0 && (
                       <>
                         <div className="label mt-4">События</div>
-                        {events.map((ev) => (
-                          <div key={ev.id} className="flex items-center gap-2 border-b border-[var(--line)] py-2 text-[12px]">
-                            <Icon name={EVENT_ICON[ev.id] ?? "sparkle"} size={14} className="text-[var(--brass)]" />
-                            <span className="flex-1 text-[#ece6d8]">{EVENT_BY_ID[ev.id].name}</span>
-                            <span className="num dim">{Math.max(0, (ev.endsAt - s.minutes) / 60).toFixed(1)} ч</span>
-                          </div>
+                        {events.map((entry) => (
+                          <button key={entry.live.uid} onClick={() => { setInfo(false); openPanel("events"); }} className="flex w-full items-center gap-2 border-b border-[var(--line)] py-2 text-left text-[12px]">
+                            <span>{entry.live.phase === "omen" ? "❔" : entry.def.icon}</span>
+                            <span className="flex-1 text-[#ece6d8]">{entry.live.phase === "omen" ? `Предвестие: ${entry.def.name}` : entry.def.name}</span>
+                            <span className="num dim">{Math.max(0, Math.ceil(entry.left))} мин</span>
+                          </button>
                         ))}
                       </>
                     )}
@@ -815,6 +830,17 @@ export default function Game() {
               </div>
             ))}
           </div>
+
+          <EventFeed
+            director={engine.eventDirector}
+            onChoose={(uid, choiceId) => engine.chooseEvent(uid, choiceId)}
+            onCue={(message) => {
+              if (message.type === "start" && ["legendary", "mythic"].includes(message.def.tier)) audio.play("legend");
+              else if (message.type === "outcome") audio.play("quest");
+              else if (message.type === "omen" || message.type === "start") audio.play("event");
+            }}
+            hidden={panel !== null || letter !== null || authOpen !== null || !!travelling || !!tripReq || engine.s.atPort}
+          />
 
           {!view.compact && !engine.s.atPort && (
             <>
@@ -958,6 +984,7 @@ export default function Game() {
           {engine.phase === "caught" && engine.lastFind && <FindModal engine={engine} />}
           {panel === "codex" && <CodexModal engine={engine} onClose={closePanel} />}
           {panel === "journal" && <JournalModal engine={engine} onClose={closePanel} settings={settings} setSettings={setSettings} />}
+          {panel === "events" && <EventsModal engine={engine} onClose={closePanel} />}
           {panel === "port" && <PortModal key={portTab} engine={engine} cloud={cloud} initialTab={portTab} onClose={closePanel} onTravel={requestTrip} onRest={startRest} onReset={reset} />}
           {letter !== null && <LetterModal engine={engine} index={letter} onClose={() => { audio.ui("paper"); setLetter(null); }} />}
         </>

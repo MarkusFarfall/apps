@@ -75,6 +75,8 @@ export const FINDS: FindDef[] = [
   { id: "whale_bone", name: "Китовый ус", icon: "", value: 1600, loc: ["antarctic", "kelp"], minDepth: 50, weight: 1.2, desc: "Пластина китового уса с резьбой — работа китобоя, коротавшего полярную ночь." },
   { id: "sextant", name: "Секстант", icon: "", value: 3200, loc: ["antarctic", "skerries", "ocean"], minDepth: 40, weight: 0.8, desc: "Латунный секстант с гравировкой экспедиционного судна. Зеркала целы." },
   { id: "idol", name: "Идол глубин", icon: "🗿", value: 12000, loc: ["abyss"], minDepth: 1500, weight: 0.4, desc: "Камень, которого нет ни в одном каталоге. Тёплый на ощупь." },
+  { id: "star_stone", name: "Звёздный камень", icon: "✨", value: 0, loc: ["bay", "estuary", "cape", "skerries", "fjord", "kelp", "reef", "mangrove", "ocean", "volcano", "abyss", "antarctic"], minDepth: 0, weight: 0, desc: "Тёплый камень, мерцающий изнутри. Похоже, он упал с неба." },
+  { id: "old_compass", name: "Старинный компас", icon: "🧭", value: 0, loc: ["bay", "estuary", "cape", "skerries", "fjord", "kelp", "reef", "mangrove", "ocean", "volcano", "abyss", "antarctic"], minDepth: 0, weight: 0, desc: "Латунный компас с потемневшей стрелкой и судовым журналом." },
 ];
 export const FIND_BY_ID = Object.fromEntries(FINDS.map((f) => [f.id, f])) as Record<string, FindDef>;
 

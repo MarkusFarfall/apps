@@ -1,6 +1,7 @@
 import type { WeatherId } from "../types";
 import type { Frame } from "./frame";
-import { clamp, ctx2d, glow, hexA, makeCanvas, mix, rng, smooth, af } from "./util";
+import { drawRainbow as drawRainbowFx } from "./weatherFx";
+import { clamp, ctx2d, glow, hexA, makeCanvas, mix, rng, smooth, af, rgbHex } from "./util";
 
 // [час, зенит, середина, горизонт]
 const SKY: [number, string, string, string][] = [
@@ -203,7 +204,7 @@ export class SkyRenderer {
     }
 
     // звёзды
-    const starA = f.night * (1 - f.cover * 0.9) * (1 - f.fogK * 0.7);
+    const starA = f.atmo.starVis;
     if (starA > 0.02) {
       if (this.milky) {
         ctx.globalAlpha = starA * 0.9;
@@ -247,13 +248,13 @@ export class SkyRenderer {
     this.drawMoon(f);
 
     // облака
-    let lit = mix("#f6f8fa", "#ffc488", f.golden * 0.85);
-    lit = mix(lit, "#ff9a88", f.golden * 0.25);
-    const wt = f.weather;
-    if (wt === "rain") lit = mix(lit, "#8c949c", 0.55);
-    if (wt === "storm") lit = mix(lit, "#4c525c", 0.72);
-    if (wt === "snow" || wt === "cloudy") lit = mix(lit, "#c6ccd4", 0.22);
-    if (wt === "fog") lit = mix(lit, "#d0d4d8", 0.3);
+    let lit = mix(rgbHex(f.atmo.palette.cloud), "#ffc488", f.golden * 0.3);
+    lit = mix(lit, "#ff9a88", f.golden * 0.15);
+    const wt = f.atmo.kind;
+    if (wt === "drizzle" || wt === "rain" || wt === "downpour") lit = mix(lit, "#8c949c", 0.45 + f.atmo.precip * 0.2);
+    if (wt === "storm" || wt === "gale" || wt === "blizzard") lit = mix(lit, "#4c525c", 0.58 + f.atmo.dark * 0.2);
+    if (wt === "snow" || wt === "overcast" || wt === "cloudy") lit = mix(lit, "#c6ccd4", 0.2);
+    if (wt === "fog") lit = mix(lit, rgbHex(f.atmo.palette.fog), 0.3);
     lit = mix(lit, "#1c2232", f.night * 0.88);
     let shade = mix(lit, f.top, 0.4);
     shade = mix(shade, f.golden > 0.1 ? "#7a5a80" : "#46505e", 0.3 + f.golden * 0.2);
@@ -268,7 +269,7 @@ export class SkyRenderer {
       ctx.globalAlpha = 1;
     }
     // перистые
-    if ((wt === "clear" || wt === "cloudy") && f.night < 0.8) {
+    if ((wt === "clear" || wt === "fair" || wt === "cloudy") && f.night < 0.8) {
       ctx.strokeStyle = hexA(lit, 0.18 * (1 - f.night));
       ctx.lineWidth = 2;
       for (let i = 0; i < 6; i++) {
@@ -282,10 +283,10 @@ export class SkyRenderer {
     const n = Math.round(clamp(f.cover * 1.25, 0, 1) * this.clouds.length);
     for (let i = 0; i < n; i++) {
       const c = this.clouds[i];
-      c.x += (c.speed + e.s.wind * 26) * f.dt * (0.5 + c.layer);
+      c.x += (c.speed + f.atmo.wind * 1.5 * f.atmo.windDir) * f.dt * (0.5 + c.layer);
       if (c.x > W + 40) c.x = -c.w * 1.4;
       if (!c.sprite) continue;
-      const big = wt === "storm" || wt === "rain" ? 1.35 : 1;
+      const big = wt === "storm" || wt === "gale" || wt === "rain" || wt === "downpour" || wt === "blizzard" ? 1.35 : 1;
       ctx.globalAlpha = wt === "fog" ? 0.55 : 0.95;
       ctx.drawImage(c.sprite, c.x, c.y - c.h * (big - 1), c.sprite.width * big, c.sprite.height * big);
     }
@@ -319,46 +320,33 @@ export class SkyRenderer {
   private drawRainbow(f: Frame) {
     const { ctx, e, W, H, hY } = f;
     const ev = e.activeEvents.find((a) => a.id === "rainbow");
-    if (!ev || f.sunElev < 0.05) return;
-    const left = (ev.endsAt - e.s.minutes) / 90;
-    const a = Math.min(1, left * 4, (1 - left) * 6 + 0.2) * 0.26 * (1 - f.night);
-    if (a <= 0.01) return;
-    const cx = W - f.sunX * 0.6 + W * 0.1, cy = hY + H * 0.1, R = H * 0.42;
-    const cols = ["#ff3030", "#ff9020", "#ffe030", "#40e040", "#30a0ff", "#5040ff", "#a040e0"];
+    let alpha = f.atmo.rainbow * 0.72;
+    if (ev && f.sunElev > 0.05) {
+      const left = (ev.endsAt - e.s.minutes) / 90;
+      alpha = Math.max(alpha, Math.min(1, left * 4, (1 - left) * 6 + 0.2) * 0.26 * (1 - f.night));
+    }
+    if (alpha <= 0.01) return;
+    const cx = W - f.sunX + W * 0.05;
+    const cy = hY + H * 0.1;
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, 0, W, hY);
     ctx.clip();
     ctx.globalCompositeOperation = "screen";
-    const bw = H * 0.011;
-    cols.forEach((c, i) => {
-      ctx.strokeStyle = hexA(c, a);
-      ctx.lineWidth = bw * 1.4;
-      ctx.beginPath();
-      ctx.arc(cx, cy, R - i * bw, Math.PI * 1.05, Math.PI * 1.95);
-      ctx.stroke();
-    });
-    ctx.globalAlpha = 0.25;
-    cols.forEach((c, i) => {
-      ctx.strokeStyle = hexA(c, a);
-      ctx.lineWidth = bw;
-      ctx.beginPath();
-      ctx.arc(cx, cy, R * 1.22 + i * bw, Math.PI * 1.08, Math.PI * 1.92);
-      ctx.stroke();
-    });
+    drawRainbowFx(ctx, cx, cy, H * 0.42, Math.min(0.7, alpha));
     ctx.restore();
   }
 
   private drawSun(f: Frame) {
     const { ctx, hY, H } = f;
-    if (f.sunElev < -0.08) return;
-    const low = 1 - clamp(f.sunElev * 2.2, 0, 1);
+    if (f.sunElev < -1) return;
+    const low = 1 - clamp(f.sunElev / 18, 0, 1);
     const r = H * 0.028 * (1 + low * 0.25);
-    const core = mix("#fffbee", "#ff8a3c", low * 0.85);
+    const core = mix(rgbHex(f.atmo.palette.sun), "#ff8a3c", low * 0.6);
     const vis = f.sunVis;
     const halo = ctx.createRadialGradient(f.sunX, f.sunY, 0, f.sunX, f.sunY, H * 0.45);
-    halo.addColorStop(0, hexA(mix("#fff2d0", "#ffb070", low), 0.55 * vis));
-    halo.addColorStop(0.12, hexA(mix("#ffe0a0", "#ff9050", low), 0.22 * vis));
+    halo.addColorStop(0, hexA(mix(rgbHex(f.atmo.palette.sun), rgbHex(f.atmo.palette.glow), 0.35 + low * 0.2), 0.55 * vis));
+    halo.addColorStop(0.12, hexA(mix(rgbHex(f.atmo.palette.sun), "#ff9050", low * 0.55), 0.22 * vis));
     halo.addColorStop(1, "rgba(255,180,120,0)");
     ctx.fillStyle = halo;
     ctx.fillRect(0, 0, f.W, hY);
@@ -376,10 +364,10 @@ export class SkyRenderer {
 
   private drawMoon(f: Frame) {
     if (!f.moonUp) return;
-    const { ctx, H, e } = f;
+    const { ctx, H } = f;
     const mx = f.moonX, my = f.moonY, r = H * 0.022;
-    const phase = e.moonIndex / 8;
-    const lit = (1 - Math.cos(phase * Math.PI * 2)) / 2;
+    const phase = f.atmo.moonPhase;
+    const lit = f.atmo.moonIllum;
     const vis = f.moonVis;
     if (vis < 0.02) return;
     const mg = ctx.createRadialGradient(mx, my, r, mx, my, r * 10);
@@ -421,14 +409,14 @@ export class SkyRenderer {
   private drawGulls(f: Frame) {
     const { ctx, e, W, t } = f;
     const gullsEv = e.activeEvents.some((a) => a.id === "gulls");
-    if (e.isNight || f.loc.land === "abyss" || f.weather === "storm") return;
+    if (e.isNight || f.loc.land === "abyss" || f.atmo.wind > 18 || f.atmo.precip > 0.82) return;
     if (!gullsEv && f.loc.land === "open" && f.spot.feature !== "seamount") return;
-    const n = gullsEv || f.spot.feature === "seamount" ? 7 : f.weather === "clear" || f.weather === "cloudy" ? 3 : 1;
+    const n = gullsEv || f.spot.feature === "seamount" ? 7 : f.atmo.precip < 0.15 && f.atmo.cover < 0.78 ? 3 : 1;
     ctx.strokeStyle = mix("#1c242c", f.hor, 0.25 + f.fogK * 0.5);
     ctx.lineCap = "round";
     for (let i = 0; i < n; i++) {
       const gg = this.gulls[i];
-      gg[0] += f.dt * (18 + i * 6) * (e.s.wind * 0.8 + 0.6);
+      gg[0] += f.dt * (18 + i * 6) * (0.6 + f.atmo.wind / 12);
       gg[2] += f.dt * (5 + i * 0.3);
       if (gg[0] > W + 40) gg[0] = -40;
       const s = gg[3];

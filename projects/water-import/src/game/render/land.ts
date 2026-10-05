@@ -1,6 +1,6 @@
 import type { Frame } from "./frame";
 import { ExtraLand } from "./lands2";
-import { clamp, fbm, glow, hash1, hexA, mix, rng, sstep, tracePoly, af } from "./util";
+import { clamp, fbm, glow, hash1, hexA, mix, rng, sstep, tracePoly, af, rgbHex } from "./util";
 
 export interface Layer {
   pts: number[];
@@ -49,7 +49,9 @@ export class LandRenderer {
   }
 
   colorOf(f: Frame, base: string, haze: number) {
-    const h = mix(base, f.hor, clamp(haze * (0.55 + f.fogK * 0.5), 0, 1));
+    const seasonTint = rgbHex(haze > 0.55 ? f.atmo.palette.land2 : f.atmo.palette.land1);
+    const litBase = mix(base, seasonTint, 0.16 + f.atmo.cover * 0.08);
+    const h = mix(litBase, f.hor, clamp(haze * (0.55 + f.fogK * 0.5), 0, 1));
     return mix(h, "#03060c", f.night * 0.8 * (1 - haze * 0.35));
   }
 
@@ -79,7 +81,7 @@ export class LandRenderer {
 
   build(f: Frame) {
     const { W, H, hY, sY, spot, loc, e } = f;
-    const key = `${spot.id}|${W}|${H}|${e.season}`;
+    const key = `${spot.id}|${W}|${H}|${e.season}|${f.atmo.snowCover > 0.18}`;
     if (key === this.key) return;
     this.key = key;
     this.layers = [];
@@ -97,7 +99,7 @@ export class LandRenderer {
     this.cliffBase = null;
     const r = rng(spot.seed * 31);
     const band = sY - hY;
-    const winter = e.season === 3;
+    const winter = f.atmo.snowCover > 0.18;
 
     switch (loc.land) {
       case "bay": {
@@ -238,18 +240,19 @@ export class LandRenderer {
         break;
     }
     if (winter && loc.climate === "temperate") {
-      for (const L of this.layers) if (L.base !== "#cdbb8c" && L.base !== "#cfb884") L.snowY = hY - H * (loc.land === "cliffs" ? 0.06 : 0.02);
+      const blanket = 0.45 + f.atmo.snowCover * 0.55;
+      for (const L of this.layers) if (L.base !== "#cdbb8c" && L.base !== "#cfb884") L.snowY = hY - H * (loc.land === "cliffs" ? 0.06 : 0.02) * blanket;
     }
   }
 
   drawAbove(f: Frame) {
     this.build(f);
     const { ctx, W, H, hY, t, night } = f;
-    // северное сияние
-    if ((f.loc.land === "fjord" || f.loc.land === "ice") && night > 0.55 && (f.weather === "clear" || f.weather === "snow" || f.weather === "cloudy")) {
+    // северное сияние — сила и вероятность приходят из атмосферы/сезона.
+    if (f.atmo.aurora > 0.01) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      const a = (night - 0.55) * 2.2 * (f.weather === "clear" ? 1 : 0.5);
+      const a = f.atmo.aurora;
       for (let k = 0; k < 4; k++) {
         for (let x = 0; x <= W; x += 6) {
           const y = H * (0.08 + k * 0.025) + Math.sin(x * 0.005 + t * 0.25 + k) * 30 + Math.sin(x * 0.012 - t * 0.17 + k * 2) * 14;
@@ -257,7 +260,7 @@ export class LandRenderer {
           const g = ctx.createLinearGradient(0, y, 0, y + hgt);
           const c = k === 2 ? "150,90,255" : "70,255,160";
           g.addColorStop(0, `rgba(${c},0)`);
-          g.addColorStop(0.7, `rgba(${c},${af(0.07 * a)})`);
+          g.addColorStop(0.7, `rgba(${c},${af(0.15 * a)})`);
           g.addColorStop(1, `rgba(${c},0)`);
           ctx.fillStyle = g;
           ctx.fillRect(x, y, 6, hgt);

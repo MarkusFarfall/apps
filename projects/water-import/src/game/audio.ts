@@ -638,6 +638,19 @@ export class GameAudio {
     }
   }
 
+  /** Atmosphere lightning: thunder arrives later when the strike is farther away. */
+  thunder(dist: number, power = 1) {
+    if (!this.ctx || !this.active || !this.enabled) return;
+    this.duckAmb();
+    const delay = 0.3 + Math.min(1, Math.max(0, dist)) * 4.5;
+    const strength = Math.min(1, Math.max(0.15, power));
+    if (delay < 0.8) this.burst({ type: "highpass", f: 1800, g: 0.25 * strength, a: 0.002, d: 0.12, at: delay });
+    this.burst({ buf: this.brown, type: "lowpass", f: 320, f2: 70, g: 0.7 * strength, a: 0.12, d: 4.5, at: delay + 0.05 });
+    for (let i = 0; i < 4; i++) {
+      this.burst({ buf: this.brown, type: "lowpass", f: 200, g: 0.35 * strength, a: 0.2, d: 1 + Math.random(), at: delay + 0.3 + i * (0.4 + Math.random() * 0.5), pan: (Math.random() - 0.5) * 0.8 });
+    }
+  }
+
   play(s: Sfx) {
     // Честный mute: «звук выключен» глушит всё, включая фанфары.
     if (!this.ctx || !this.active || !this.enabled) return;
@@ -840,15 +853,25 @@ export class GameAudio {
     const now = ctx.currentTime;
     // Сохранение нормализуется в migrateSave(), но звук не имеет права ронять
     // кадр: любое неизвестное или нечисловое значение заменяется рабочим.
-    const w = WEATHER_INFO[e.s.weather] ?? WEATHER_INFO.clear;
-    const port = e.s.atPort;
+    const weatherKey = e.weather ?? e.s?.weather ?? "clear";
+    const weatherInfo = WEATHER_INFO[weatherKey] ?? WEATHER_INFO.clear;
+    const rawAtmo = e.atmosphere?.state;
+    const savedWind = typeof e.s?.wind === "number" && Number.isFinite(e.s.wind) ? e.s.wind : 0.35;
+    const finite = (value: unknown, fallback: number) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
+    const atmo = {
+      waves: Math.max(0, Math.min(10, finite(rawAtmo?.waves, weatherInfo.wave))),
+      wind: Math.max(0, Math.min(36, finite(rawAtmo?.wind, savedWind * 18))),
+      rain: Math.max(0, Math.min(1, finite(rawAtmo?.rain, weatherKey === "rain" || weatherKey === "storm" ? 0.6 : 0))),
+      snow: Math.max(0, Math.min(1, finite(rawAtmo?.snow, weatherKey === "snow" ? 0.7 : 0))),
+      precip: Math.max(0, Math.min(1, finite(rawAtmo?.precip, weatherKey === "snow" ? 0.8 : weatherKey === "rain" || weatherKey === "storm" ? 0.6 : 0))),
+    };
+    const port = !!e.s?.atPort;
     const calmEv = e.activeEvents?.some((a) => a.id === "calm") ? 0.3 : 1;
     const waveMult = Number.isFinite(e.loc?.waveMult) ? e.loc.waveMult : 1;
     const swellRaw = e.spot?.swell;
     const swell = typeof swellRaw === "number" && Number.isFinite(swellRaw) ? swellRaw : 1;
     const tier = Number.isFinite(e.boat?.tier) ? e.boat.tier : 0;
-    const windBase = Number.isFinite(e.s.wind) ? e.s.wind : 0;
-    const waveAmp = w.wave * waveMult * swell * calmEv;
+    const waveAmp = atmo.waves * waveMult * swell * calmEv;
 
     // волны: цикл набегания
     this.waveT += dt;
@@ -866,14 +889,14 @@ export class GameAudio {
 
     // ветер с порывами
     const gust = 0.55 + 0.45 * Math.sin(now * 0.37) * Math.sin(now * 0.13 + 1.3);
-    const wind = windBase + (e.s.weather === "storm" ? 0.35 : 0);
+    const wind = Math.min(1.5, atmo.wind / 18);
     this.tgt(this.windG.gain, port ? 0.01 : wind * 0.09 * gust, now, 0.4, "windG#4");
     this.tgt(this.windF.frequency, 380 + gust * 700 * (0.5 + wind), now, 0.4, "windF#5");
     this.tgt(this.whistleG.gain, port ? 0 : Math.max(0, wind - 0.5) * 0.018 * gust, now, 0.6, "whistleG#6");
     this.tgt(this.whistleF.frequency, 1500 + gust * 900, now, 0.5, "whistleF#7");
 
     // дождь
-    const rain = e.s.weather === "storm" ? 1 : e.s.weather === "rain" ? 0.6 : e.s.weather === "snow" ? 0.05 : 0;
+    const rain = Math.min(1, atmo.rain + atmo.snow * 0.06);
     this.tgt(this.rainHi.gain, port ? rain * 0.01 : rain * 0.06, now, 1, "rainHi#8");
     this.tgt(this.rainLo.gain, port ? rain * 0.03 : rain * 0.07, now, 1, "rainLo#9");
     if (rain > 0.3 && this.enabled && !port) {
@@ -939,14 +962,16 @@ export class GameAudio {
     if (this.gullT <= 0) {
       const gullsEv = e.activeEvents?.some((a) => a.id === "gulls" || a.id === "shoal") ?? false;
       this.gullT = gullsEv ? 3 + Math.random() * 5 : 14 + Math.random() * 24;
-      if (this.enabled && !port && !e.isNight && e.s.weather !== "storm" && under < 0.5 && (["bay", "cape", "reef"].includes(e.s.location) || gullsEv)) this.seagull((Math.random() - 0.3) * 1.4);
+      if (this.enabled && !port && !e.isNight && atmo.wind < 18 && atmo.precip < 0.82 && under < 0.5 && (["bay", "cape", "reef"].includes(e.s.location) || gullsEv)) this.seagull((Math.random() - 0.3) * 1.4);
     }
 
     // снасть
     const h = e.hooked;
     if (h && e.phase === "fight" && !e.paused) {
-      const dLine = h.line - this.lastLine;
-      this.lastLine = h.line;
+      const lineLength = finite(h.line, 0);
+      const tension = Math.max(0, finite(h.tension, 0));
+      const dLine = lineLength - this.lastLine;
+      this.lastLine = lineLength;
       const outRate = dLine > 0 ? dLine / Math.max(dt, 0.001) : 0;
       const inRate = dLine < 0 ? -dLine / Math.max(dt, 0.001) : 0;
       if (this.enabled) {
@@ -962,7 +987,7 @@ export class GameAudio {
           this.burst({ type: "bandpass", f: drag ? 3600 + Math.random() * 600 : 2300 + Math.random() * 300, q: drag ? 6 : 4, g: drag ? 0.09 : 0.05, a: 0.0008, d: drag ? 0.01 : 0.014, at: Math.random() * 0.01, pan: this.quality >= 2 ? 0.15 : undefined });
         }
       }
-      const t = Math.min(1.2, h.tension);
+      const t = Math.min(1.2, tension);
       this.tgt(this.tensionG.gain, this.enabled ? Math.pow(Math.max(0, t - 0.5) * 1.6, 1.5) * 0.35 : 0, now, 0.06, "tensionG#15");
       this.tgt(this.tensionF.frequency, 700 + t * 1300, now, 0.08, "tensionF#16");
       this.tgt(this.creakG.gain, this.enabled ? Math.max(0, t - 0.75) * 0.55 : 0, now, 0.08, "creakG#17");

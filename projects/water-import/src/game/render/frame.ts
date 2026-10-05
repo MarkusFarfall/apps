@@ -1,4 +1,5 @@
 import type { Engine } from "../engine";
+import type { AtmosphereState } from "../atmosphere/types";
 import type { LocationDef, SpotDef, WeatherId } from "../types";
 
 export interface Frame {
@@ -7,6 +8,7 @@ export interface Frame {
   loc: LocationDef;
   spot: SpotDef;
   weather: WeatherId;
+  atmo: AtmosphereState;
   W: number;
   H: number;
   t: number;

@@ -1,6 +1,9 @@
 import { FISH_BY_ID } from "@/game/fish";
+import { EventDirector } from "@/game/events";
+import type { DirectorSave } from "@/game/events/types";
+import { GAME_EVENT_BY_ID, GAME_EVENTS } from "@/game/events/gameCatalog";
 import { ACHIEVEMENTS, FIND_BY_ID } from "@/game/progress";
-import { BOATS, EVENT_BY_ID, LOCATIONS, LOC_BY_ID, PORT_BY_ID, SONARS, SPOT_BY_ID, WEATHER_INFO, spotsOf } from "@/game/world";
+import { BOATS, LOCATIONS, LOC_BY_ID, PORT_BY_ID, SONARS, SPOT_BY_ID, WEATHER_INFO, spotsOf } from "@/game/world";
 import type { LocId, SaveData, WeatherId } from "@/game/types";
 
 /**
@@ -183,9 +186,28 @@ export function sanitizeSave(data: Record<string, unknown>, options: SanitizeOpt
   const orders = knownList(out.orders, (x) => x.fishId, FISH_BY_ID, 50);
   if (orders !== null && orders !== out.orders) clamped.push("orders");
   if (orders !== null) out.orders = orders;
-  const events = knownList(out.events, (x) => x.id, EVENT_BY_ID, 50);
+  const events = knownList(out.events, (x) => x.id, GAME_EVENT_BY_ID, 50);
   if (events !== null && events !== out.events) clamped.push("events");
   if (events !== null) out.events = events;
+
+  // EventDirector is versioned JSON inside the existing save column, so it does
+  // not require a schema migration. Normalize its nested state before persisting.
+  if (out.eventDirector !== undefined) {
+    const rawDirector = out.eventDirector;
+    if (rawDirector && typeof rawDirector === "object" && !Array.isArray(rawDirector) && (rawDirector as Record<string, unknown>).v === 1) {
+      const eventT = clamp(out.minutes, MAX.minutes);
+      const location = typeof out.location === "string" ? out.location : "bay";
+      const seed = ((eventT | 0) ^ (location.length * 0x45d9f3b) ^ 0x9e3779b9) | 0;
+      const director = new EventDirector({ seed, catalog: GAME_EVENTS, startT: eventT });
+      director.load(rawDirector as DirectorSave);
+      const normalized = director.save();
+      if (JSON.stringify(rawDirector) !== JSON.stringify(normalized)) clamped.push("eventDirector");
+      out.eventDirector = normalized;
+    } else {
+      delete out.eventDirector;
+      clamped.push("eventDirector");
+    }
+  }
 
   // ── статистика ──
   const statsRaw = data.stats && typeof data.stats === "object" && !Array.isArray(data.stats) ? (data.stats as Record<string, unknown>) : {};
