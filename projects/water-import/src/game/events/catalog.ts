@@ -29,16 +29,6 @@ export const TIER_INFO: Record<EventTier, { name: string; color: string; weight:
   mythic: { name: 'Мифическое', color: '#ff7a6b', weight: 0.12 },
 };
 
-export const CATEGORY_INFO: Record<EventDef['cat'], { name: string; icon: string }> = {
-  fish: { name: 'Рыба', icon: '🐟' },
-  life: { name: 'Обитатели', icon: '🐬' },
-  sky: { name: 'Небо', icon: '✨' },
-  mystic: { name: 'Тайны', icon: '🕯️' },
-  hazard: { name: 'Стихия', icon: '⚠️' },
-  find: { name: 'Находки', icon: '🍾' },
-  people: { name: 'Люди', icon: '⛵' },
-};
-
 /* ─────────────── каталог ─────────────── */
 
 export const EVENTS: EventDef[] = [
@@ -833,8 +823,6 @@ export const EVENTS: EventDef[] = [
     fx: [{ id: 'sails' }],
   },
 ];
-
-export const EVENT_BY_ID: Record<string, EventDef> = Object.fromEntries(EVENTS.map((e) => [e.id, e]));
 
 /** Подписи эффектов для интерфейса */
 export function effectChips(e: Partial<Record<keyof import('./types').EventEffects, number>>) {

@@ -194,7 +194,10 @@ export function sanitizeSave(data: Record<string, unknown>, options: SanitizeOpt
   // not require a schema migration. Normalize its nested state before persisting.
   if (out.eventDirector !== undefined) {
     const rawDirector = out.eventDirector;
-    if (rawDirector && typeof rawDirector === "object" && !Array.isArray(rawDirector) && (rawDirector as Record<string, unknown>).v === 1) {
+    const directorVersion = rawDirector && typeof rawDirector === "object" && !Array.isArray(rawDirector)
+      ? (rawDirector as Record<string, unknown>).v
+      : undefined;
+    if (directorVersion === 1 || directorVersion === 2) {
       const eventT = clamp(out.minutes, MAX.minutes);
       const location = typeof out.location === "string" ? out.location : "bay";
       const seed = ((eventT | 0) ^ (location.length * 0x45d9f3b) ^ 0x9e3779b9) | 0;

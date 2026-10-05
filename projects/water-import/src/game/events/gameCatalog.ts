@@ -1,8 +1,8 @@
 import type { EventDef } from "./types";
 import { EVENTS as RELEASE_EVENTS } from "./catalog";
 
-/** Small compatibility layer for legacy events that had no direct Ysys entry. */
-const LEGACY_EVENTS: EventDef[] = [
+/** Уникальные явления, сохранённые из прежнего контента; работают только через новый EventDirector. */
+const SUPPLEMENTAL_EVENTS: EventDef[] = [
   {
     id: "calm",
     name: "Мёртвый штиль",
@@ -80,5 +80,5 @@ const LEGACY_EVENTS: EventDef[] = [
   },
 ];
 
-export const GAME_EVENTS: EventDef[] = [...RELEASE_EVENTS, ...LEGACY_EVENTS];
+export const GAME_EVENTS: EventDef[] = [...RELEASE_EVENTS, ...SUPPLEMENTAL_EVENTS];
 export const GAME_EVENT_BY_ID = Object.fromEntries(GAME_EVENTS.map((e) => [e.id, e])) as Record<string, EventDef>;

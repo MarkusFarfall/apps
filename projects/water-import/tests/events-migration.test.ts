@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Engine, migrateSave, newSave } from "../src/game/engine";
-import { EventDirector } from "../src/game/events";
+import { Atmosphere } from "../src/game/atmosphere";
+import { ctxFromAtmosphere, EventDirector } from "../src/game/events";
 import { GAME_EVENTS } from "../src/game/events/gameCatalog";
 import type { DirectorSave, LiveEvent } from "../src/game/events/types";
 import type { SaveData } from "../src/game/types";
@@ -46,4 +47,44 @@ test("server sanitizer preserves release events, reward finds, and normalizes ne
   const engine = new Engine(clean.data as unknown as SaveData);
   assert.equal(engine.eventDirector.activeList()[0]?.def.id, "current");
   assert.equal(engine.s.finds.old_compass, 2);
+});
+
+test("legacy supplemental events remain loadable through the single new director", () => {
+  const raw = newSave();
+  raw.minutes = 2_500;
+  raw.events = [{ id: "calm", endsAt: raw.minutes + 90 }];
+  delete raw.eventDirector;
+
+  const migrated = migrateSave(raw);
+  assert.ok(migrated);
+  const engine = new Engine(migrated);
+  assert.deepEqual(engine.eventDirector.activeList().map(({ def }) => def.id), ["calm"]);
+});
+
+test("director v1 saves migrate to the new rare cadence without a DB-schema change", () => {
+  const startT = 1_200;
+  const oldDirector = new EventDirector({ seed: 18, catalog: GAME_EVENTS, startT });
+  const oldState = oldDirector.save();
+  oldState.v = 1;
+  oldState.next = startT + 8;
+  oldState.auto = false;
+
+  const restored = new EventDirector({ seed: 19, catalog: GAME_EVENTS, startT });
+  restored.load(oldState);
+  const migrated = restored.save();
+  assert.equal(migrated.v, 2);
+  assert.equal(restored.auto, true);
+  assert.ok(migrated.next - startT >= 520);
+});
+
+test("event rolls now have long quiet intervals", () => {
+  const startT = 900;
+  const director = new EventDirector({ seed: 42, catalog: GAME_EVENTS, startT });
+  const first = director.save();
+  assert.ok(first.next - startT >= 520 && first.next - startT < 1_160);
+
+  const atmosphere = new Atmosphere({ climate: "temperate", seed: 12 });
+  director.update(first.next, ctxFromAtmosphere(atmosphere, { loc: "bay" }));
+  const next = director.save();
+  assert.ok(next.next - next.T >= 520 && next.next - next.T <= 2_784);
 });

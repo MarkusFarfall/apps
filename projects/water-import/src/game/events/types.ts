@@ -209,7 +209,7 @@ export interface Buff {
 }
 
 export interface DirectorSave {
-  v: 1;
+  v: 1 | 2;
   T: number;
   next: number;
   live: LiveEvent[];
