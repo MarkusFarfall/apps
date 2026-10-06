@@ -173,7 +173,7 @@ export function PortHub({ engine, hot, compact, onOpen, onTravel, onJournal, onC
 
       {/* нижняя панель навигации */}
       <div className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-2 px-2 pb-[max(10px,env(safe-area-inset-bottom))] sm:flex-row sm:items-end sm:justify-center">
-        <div className="glass no-scrollbar flex max-w-full gap-0.5 overflow-x-auto p-1">
+        <div className="glass no-scrollbar zv-fade-x flex max-w-full gap-0.5 overflow-x-auto p-1">
           {dock.map((d) => (
             <button
               key={d.id}

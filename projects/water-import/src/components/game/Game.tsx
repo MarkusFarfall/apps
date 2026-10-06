@@ -924,7 +924,7 @@ export default function Game() {
                   className="depth-range min-w-0 flex-1"
                 />
                   <span className="num w-12 shrink-0 text-right text-[14px] text-[#f1ebdd]">{Math.min(s.targetDepth, maxD)}<span className="text-[10px] dim"> м</span></span>
-                  <div className="no-scrollbar flex max-w-[38%] gap-1 overflow-x-auto">
+                  <div className="no-scrollbar zv-fade-x flex max-w-[38%] gap-1 overflow-x-auto">
                   {BAITS.map((b) => {
                     const n = b.id === "worm" ? Infinity : s.baits[b.id] ?? 0;
                     if (n <= 0 && b.id !== s.currentBait) return null;
@@ -957,7 +957,7 @@ export default function Game() {
                 />
                     <span className="num w-12 shrink-0 text-right text-[15px] text-[#f1ebdd]">{Math.min(s.targetDepth, maxD)}<span className="text-[10px] dim"> м</span></span>
                   </div>
-                  <div className="no-scrollbar -mx-3 mt-2 flex gap-1.5 overflow-x-auto px-3">
+                  <div className="no-scrollbar zv-fade-x -mx-3 mt-2 flex gap-1.5 overflow-x-auto px-3">
                   {BAITS.map((b) => {
                     const n = b.id === "worm" ? Infinity : s.baits[b.id] ?? 0;
                     if (n <= 0 && b.id !== s.currentBait) return null;

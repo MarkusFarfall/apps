@@ -191,7 +191,7 @@ export function migrateSave(raw: unknown): SaveData | null {
   s.flags = Array.isArray(s.flags) ? s.flags : [];
   s.hints = Array.isArray(s.hints) ? s.hints : [];
   s.milestones = Array.isArray(s.milestones) ? s.milestones : [];
-  s.sonar = Math.max(0, Math.min(SONARS.length - 1, s.sonar | 0));
+  s.sonar = 0; // эхолот отключён полностью
   // флот: миграция со старой линейки из пяти судов
   const ver = typeof r.version === "number" ? r.version : 1;
   if (ver < 3) {

@@ -150,7 +150,7 @@ export function sanitizeSave(data: Record<string, unknown>, options: SanitizeOpt
     out.finds = finds;
   }
   put("ordersDone", 99_999);
-  if (out.sonar !== undefined) put("sonar", SONARS.length - 1);
+  if (out.sonar !== undefined) put("sonar", 0); // эхолот отключён
 
   // ── кодекс: только существующие виды, вес не выше максимума вида ──
   const codexRaw = data.codex && typeof data.codex === "object" && !Array.isArray(data.codex) ? (data.codex as Record<string, unknown>) : {};

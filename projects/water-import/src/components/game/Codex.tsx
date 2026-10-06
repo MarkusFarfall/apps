@@ -98,7 +98,7 @@ export function Codex({ codex, onClose }: { codex?: Record<string, CodexEntry>; 
 
       {/* фильтры */}
       <div className="flex flex-col gap-2 border-b border-[var(--line)] px-4 py-2.5 min-[820px]:px-6">
-        <div className="zv-scroll-x flex gap-1.5 overflow-x-auto pb-0.5">
+        <div className="zv-scroll-x zv-fade-x flex gap-1.5 overflow-x-auto pb-0.5">
           <Chip on={loc === 'all'} onClick={() => setLoc('all')}>
             Все акватории
           </Chip>

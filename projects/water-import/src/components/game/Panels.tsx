@@ -31,7 +31,7 @@ export function Modal({ label, title, onClose, children, tabs, right, wide = tru
             <button onClick={onClose} className="iconbtn" aria-label="Закрыть"><Icon name="close" size={16} /></button>
           </div>
         </div>
-        {tabs && <div className="no-scrollbar mt-3 flex shrink-0 gap-5 overflow-x-auto border-b border-[var(--line)] px-4 sm:mt-4 sm:gap-6 sm:px-7">{tabs}</div>}
+        {tabs && <div className="shrink-0 border-b border-[var(--line)]"><div className="no-scrollbar zv-fade-x mt-3 flex gap-5 overflow-x-auto px-4 sm:mt-4 sm:gap-6 sm:px-7">{tabs}</div></div>}
         {!tabs && <div className="rule mx-4 mt-4 shrink-0 sm:mx-7 sm:mt-5" />}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</div>
       </div>
@@ -463,7 +463,7 @@ const romanize = (n: number) => ["I", "II", "III", "IV", "V", "VI"][n - 1] ?? St
 
 // Морская карта
 const CHART_POS = LOC_POS;
-const GEAR_ROWS: [GearKind, string, string][] = [["rod", "Удилище", "Предел натяжения"], ["reel", "Катушка", "Скорость подмотки"], ["line", "Леска", "Рабочая глубина"], ["hook", "Крючок", "Удержание"], ["sonar", "Эхолот", "Возможности"]];
+const GEAR_ROWS: [GearKind, string, string][] = [["rod", "Удилище", "Предел натяжения"], ["reel", "Катушка", "Скорость подмотки"], ["line", "Леска", "Рабочая глубина"], ["hook", "Крючок", "Удержание"]];
 const gearValue = (k: GearKind, v: number, desc: string) => (k === "line" ? `${v} м` : k === "reel" ? `×${v}` : k === "hook" ? ["базовое", "острое", "надёжное", "самозасекающее", "абсолютное"][v] ?? String(v) : k === "sonar" ? desc.toLowerCase() : String(v));
 const TAVERN: Record<PortId, string> = { home: "Таверна «Старый якорь»", nordhavn: "Постоялый двор «Кракен»", mirador: "Отель «Пирс»", coral: "Гостевой дом «Ла Пальма»", southcross: "Жилой модуль станции" };
 const CLIMATE_NAME: Record<string, string> = { temperate: "умеренный", north: "северный", tropic: "тропический", ocean: "океанический", polar: "полярный", misty: "туманный приморский" };

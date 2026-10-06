@@ -1017,3 +1017,11 @@ input {
     transform: none;
   }
 }
+
+/* на телефоне ряд уходит за край — мягкое затухание справа подсказывает прокрутку */
+@media (max-width: 640px) {
+  .zv-fade-x {
+    -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 26px), transparent);
+    mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 26px), transparent);
+  }
+}
