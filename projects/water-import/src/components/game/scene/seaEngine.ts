@@ -1,4 +1,9 @@
 import type { SeaSfx } from '../../../game/authAudio';
+import { drawFish as drawFishModel } from '../../../game/fishDraw';
+import { FISH_BY_ID } from '../../../game/fish';
+
+// Рыба сцены входа рисуется новыми моделями из релиза «Новые модели рыб» (fishDraw v2).
+const AUTH_FISH = FISH_BY_ID['bay_master'];
 
 /**
  * Движок сцены входа «Знакомой воды» — v3 (оптимизированный).
@@ -1291,7 +1296,7 @@ export class SeaEngine {
         f.x += f.vx * dt;
         f.y += f.vy * dt;
         f.spin = Math.atan2(f.vy, f.vx) + Math.sin(this.t * 22) * 0.35;
-        f.tail = Math.sin(this.t * 30);
+        f.tail = this.t * 30;
         this.bendTarget = 0.7;
         this.tension = 1;
         if (this.rnd() < dt * 10) this.drops.push({ x: f.x, y: f.y, vx: (this.rnd() - 0.5) * 60 * s, vy: 0, life: 0, r: 1.2 * s });
@@ -1322,7 +1327,7 @@ export class SeaEngine {
         f.x += f.vx * dt;
         f.y += f.vy * dt;
         f.tilt = clamp(Math.atan2(f.vy, Math.abs(f.vx)), -0.6, 0.6);
-        f.tail = Math.sin(this.t * 34);
+        f.tail = this.t * 34;
         if (f.st > 0.8) f.alpha = Math.max(0, f.alpha - dt * 1.5);
         if (f.st > 2.4) {
           f.state = 'roam';
@@ -1348,7 +1353,7 @@ export class SeaEngine {
     if (f.state === 'hooked' || f.state === 'approach') f.dir = hookX > f.x ? 1 : -1;
     const tilt = clamp(Math.atan2(f.vy, Math.abs(f.vx) + 20 * s), -0.5, 0.5);
     f.tilt += (tilt - f.tilt) * Math.min(1, dt * 5);
-    f.tail = Math.sin(this.t * (5 + Math.hypot(f.vx, f.vy) / (12 * s)));
+    f.tail = this.t * (5 + Math.hypot(f.vx, f.vy) / (12 * s));
   }
 
   /* ────────────────────────── отрисовка ────────────────────────── */
@@ -1759,9 +1764,7 @@ export class SeaEngine {
         c.translate(j.x + j.dir * qq * j.size * 3, j.y - Math.sin(qq * Math.PI) * j.size * 2.6);
         c.rotate(j.dir * (qq - 0.5) * 2.2);
         c.scale(j.dir, 1);
-        c.fillStyle = css(mixC(p.land1, [0, 0, 0], 0.2), 0.9);
-        this.fishPath(j.size * 2, Math.sin(t * 30));
-        c.fill();
+        drawFishModel(c, AUTH_FISH, 0, 0, j.size * 2, 1, { wag: t * 30, silhouette: css(mixC(p.land1, [0, 0, 0], 0.2), 0.9) });
         c.restore();
       }
       if (age > 0.6) {
@@ -1955,8 +1958,7 @@ export class SeaEngine {
         c.translate(x, y);
         c.scale(sc.dir, 1);
         c.rotate(Math.sin(t * 1.9 + f.ph * 2) * 0.12);
-        this.fishPath(f.len * s, Math.sin(t * 9 + f.ph * 3));
-        c.fill();
+        drawFishModel(c, AUTH_FISH, 0, 0, f.len * s, 1, { wag: t * 9 + f.ph * 3, silhouette: css(mixC(mixC([120, 150, 165], p.deep, depthK * 0.7), p.glow, 0.05)) });
         c.restore();
       }
       c.globalAlpha = 1;
@@ -2041,10 +2043,9 @@ export class SeaEngine {
       }
       c.save();
       c.translate(f.x, f.y);
-      c.scale(f.dir, 1);
       c.rotate(f.tilt);
       c.globalAlpha = f.alpha;
-      this.drawFish(64 * s, css(mixC(mixC([58, 92, 108], p.glow, 0.08), p.deep, depthK * 0.4)), css(mixC([196, 204, 196], p.deep, depthK * 0.45)), f.tail);
+      drawFishModel(c, AUTH_FISH, 0, 0, 64 * s, f.dir > 0 ? 1 : -1, { wag: f.tail, darken: depthK * 0.4 });
       c.restore();
     }
   }
@@ -2177,7 +2178,7 @@ export class SeaEngine {
       c.translate(f.x, f.y);
       c.rotate(f.spin);
       if (Math.cos(f.spin) < 0) c.scale(1, -1);
-      this.drawFish(64 * s, css(mixC([70, 110, 125], p.glow, 0.15)), css([230, 228, 215]), f.tail);
+      drawFishModel(c, AUTH_FISH, 0, 0, 64 * s, 1, { wag: f.tail });
       c.restore();
     }
 
@@ -2319,59 +2320,6 @@ export class SeaEngine {
       c.fillStyle = `rgba(3,8,14,${dark})`;
       c.fillRect(0, 0, W, H);
     }
-  }
-
-  private fishPath(len: number, tail: number) {
-    const c = this.c;
-    const h = len * 0.26;
-    c.beginPath();
-    c.moveTo(len * 0.5, 0);
-    c.bezierCurveTo(len * 0.38, -h * 1.05, -len * 0.1, -h * 1.1, -len * 0.33, -h * 0.2);
-    c.lineTo(-len * 0.5, -h * 0.95 + tail * h * 0.35);
-    c.quadraticCurveTo(-len * 0.43, tail * h * 0.2, -len * 0.5, h * 0.95 + tail * h * 0.35);
-    c.lineTo(-len * 0.33, h * 0.2);
-    c.bezierCurveTo(-len * 0.1, h * 1.0, len * 0.36, h * 0.95, len * 0.5, 0);
-    c.closePath();
-  }
-
-  private drawFish(len: number, top: string, belly: string, tail: number) {
-    const c = this.c;
-    const h = len * 0.26;
-    this.fishPath(len, tail);
-    const g = c.createLinearGradient(0, -h, 0, h);
-    g.addColorStop(0, top);
-    g.addColorStop(0.55, top);
-    g.addColorStop(1, belly);
-    c.fillStyle = g;
-    c.fill();
-    c.beginPath();
-    c.moveTo(len * 0.12, -h * 0.92);
-    c.quadraticCurveTo(-len * 0.02, -h * 1.75, -len * 0.18, -h * 0.7);
-    c.fillStyle = top;
-    c.fill();
-    c.fillStyle = 'rgba(240,235,220,0.9)';
-    c.beginPath();
-    c.arc(len * 0.34, -h * 0.18, Math.max(0.8, len * 0.035), 0, Math.PI * 2);
-    c.fill();
-    c.fillStyle = '#111';
-    c.beginPath();
-    c.arc(len * 0.345, -h * 0.18, len * 0.018, 0, Math.PI * 2);
-    c.fill();
-    c.strokeStyle = 'rgba(0,0,0,0.25)';
-    c.lineWidth = 1;
-    c.beginPath();
-    c.arc(len * 0.24, 0, h * 0.6, -1, 1);
-    c.stroke();
-    c.strokeStyle = 'rgba(255,255,255,0.18)';
-    c.beginPath();
-    c.moveTo(len * 0.2, -h * 0.05);
-    c.quadraticCurveTo(0, h * 0.05, -len * 0.3, 0);
-    c.stroke();
-    c.fillStyle = 'rgba(0,0,0,0.18)';
-    c.beginPath();
-    c.moveTo(len * 0.16, h * 0.3);
-    c.quadraticCurveTo(len * 0.02, h * (0.9 + tail * 0.2), -len * 0.02, h * 0.45);
-    c.fill();
   }
 
   private drawBoat(p: Pal) {

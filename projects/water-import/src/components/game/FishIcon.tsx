@@ -1,8 +1,26 @@
-"use client";
+'use client';
 
-import { useEffect, useRef } from "react";
-import { drawFish } from "@/game/fishDraw";
-import type { FishDef, Variant } from "@/game/types";
+// Те же пропсы, что у src/components/game/FishIcon.tsx оригинала — заменяется один в один
+import { useEffect, useRef } from 'react';
+import { drawFish } from '@/game/fishDraw';
+import type { FishDef, Variant } from '@/game/types';
+
+const TALL = ['Hippocampus', 'Enteroctopus', 'Grimpoteuthis'];
+const ROUND: FishDef['shape'][] = ['deep', 'flat', 'angler', 'blob', 'puffer'];
+
+/** Размер и центр рыбы в рамке (общая логика для иконок и аквариума) */
+export function fishFrame(fish: FishDef, w: number, h: number) {
+  const genus = fish.latin.split(' ')[0];
+  const shapeMul = fish.shape === 'billfish' ? 0.6 : fish.shape === 'squid' ? 0.58 : fish.shape === 'ray' ? 0.62 : fish.shape === 'eel' || fish.shape === 'long' ? 0.84 : 0.78;
+  let L = Math.min(w * shapeMul, h * (ROUND.includes(fish.shape) ? 1.2 : fish.shape === 'ray' ? 1.0 : 2.4));
+  if (genus === 'Mola') L = Math.min(w * 0.62, h * 0.95);
+  if (genus === 'Alopias') L = Math.min(w * 0.6, h * 1.6);
+  if (genus === 'Pristis' || genus === 'Mitsukurina') L = Math.min(w * 0.66, h * 2.2);
+  const tall = TALL.includes(genus);
+  const cx = tall ? w / 2 : fish.shape === 'billfish' ? w * 0.42 : fish.shape === 'squid' ? w * 0.62 : fish.shape === 'ray' ? w * 0.6 : genus === 'Alopias' ? w * 0.62 : genus === 'Pristis' ? w * 0.4 : w / 2;
+  const cy = h / 2 + (fish.shape === 'angler' ? h * 0.1 : 0);
+  return { L: tall ? h * 0.95 : L, cx, cy };
+}
 
 export function FishIcon({
   fish,
@@ -27,22 +45,18 @@ export function FishIcon({
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     c.width = size * dpr;
     c.height = h * dpr;
-    const ctx = c.getContext("2d");
+    const ctx = c.getContext('2d');
     if (!ctx) return;
     let raf = 0;
     const start = performance.now();
-    const shapeMul = fish.shape === "billfish" ? 0.62 : fish.shape === "squid" ? 0.6 : fish.shape === "ray" ? 0.62 : fish.shape === "eel" || fish.shape === "long" ? 0.86 : 0.78;
+    const { L, cx, cy } = fishFrame(fish, size, h);
     const draw = () => {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, size, h);
       const t = (performance.now() - start) / 1000;
-      const L = Math.min(size * shapeMul, h * (fish.shape === "deep" || fish.shape === "flat" || fish.shape === "angler" || fish.shape === "blob" || fish.shape === "puffer" ? 1.2 : fish.shape === "ray" ? 1.0 : 2.4));
-      const tall = ["Hippocampus", "Enteroctopus", "Grimpoteuthis"].includes(fish.latin.split(" ")[0]);
-      const Lf = tall ? h * 1.0 : L;
-      const cx = fish.shape === "billfish" ? size * 0.44 : fish.shape === "squid" ? size * 0.62 : fish.shape === "ray" ? size * 0.6 : size / 2;
-      drawFish(ctx, fish, tall ? size / 2 : cx, h / 2 + (fish.shape === "angler" ? h * 0.08 : 0), Lf, 1, {
+      drawFish(ctx, fish, cx, cy, L, 1, {
         wag: animate ? t * 4 : 0.6,
-        silhouette: known ? null : "rgba(150,180,200,0.14)",
+        silhouette: known ? null : 'rgba(150,180,200,0.14)',
         variant,
       });
       if (animate) raf = requestAnimationFrame(draw);
@@ -50,5 +64,5 @@ export function FishIcon({
     draw();
     return () => cancelAnimationFrame(raf);
   }, [fish, size, h, known, variant, animate]);
-  return <canvas ref={ref} style={{ width: size, maxWidth: "100%", height: "auto", aspectRatio: `${size} / ${h}` }} className="block" />;
+  return <canvas ref={ref} style={{ width: size, height: h }} className="block" aria-hidden="true" />;
 }

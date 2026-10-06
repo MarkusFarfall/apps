@@ -967,3 +967,53 @@ input {
     transition-duration: 0.01ms !important;
   }
 }
+/*
+ * Стили кодекса рыб — только новые классы.
+ * Остальное (btn, cell, label, field, sheet, depth-range, muted, dim, num…) уже есть в globals.css игры.
+ * При переносе: дописать этот файл в конец src/app/globals.css.
+ */
+
+.zv-codex {
+  animation: zvCodexIn 0.5s ease-out;
+}
+@keyframes zvCodexIn {
+  from {
+    opacity: 0;
+  }
+}
+
+.zv-fish-card {
+  transition: background 0.15s, border-color 0.15s, transform 0.2s, box-shadow 0.2s;
+}
+.zv-fish-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), 0 0 0 1px color-mix(in srgb, var(--rar) 30%, transparent);
+}
+
+.zv-scroll-x {
+  scrollbar-width: none;
+}
+.zv-scroll-x::-webkit-scrollbar {
+  display: none;
+}
+
+/* карточка вида на телефоне выезжает снизу */
+.zv-sheet-up {
+  animation: zvSheetUp 0.45s cubic-bezier(0.16, 0.9, 0.2, 1);
+}
+@keyframes zvSheetUp {
+  from {
+    opacity: 0;
+    transform: translateY(60px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zv-codex,
+  .zv-sheet-up {
+    animation: none;
+  }
+  .zv-fish-card:hover {
+    transform: none;
+  }
+}

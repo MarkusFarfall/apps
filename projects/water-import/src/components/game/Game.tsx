@@ -16,7 +16,8 @@ import { BAITS, PORT_BY_ID, SEASONS, WEATHER_INFO, spotsOf } from "@/game/world"
 import { BaitIcon, Icon, MoonIcon } from "./Icons";
 import { EventFeed } from "./EventFeed";
 import { DailyTracker, FindModal, JournalModal, LetterModal, QuestTracker, XpBar, type Settings } from "./Journal";
-import { CatchModal, CodexModal, fmt, PortModal, type PortTab } from "./Panels";
+import { CatchModal, fmt, PortModal, type PortTab } from "./Panels";
+import { Codex } from "./Codex";
 import { TravelChoice, TravelOverlay } from "./Travel";
 import { PortHub } from "./PortHub";
 import { RestTransition } from "./RestTransition";
@@ -989,7 +990,7 @@ export default function Game() {
 
           {engine.phase === "caught" && engine.lastCatch && <CatchModal engine={engine} />}
           {engine.phase === "caught" && engine.lastFind && <FindModal engine={engine} />}
-          {panel === "codex" && <CodexModal engine={engine} onClose={closePanel} />}
+          {panel === "codex" && <Codex codex={engine.s.codex} onClose={closePanel} />}
           {panel === "journal" && <JournalModal engine={engine} onClose={closePanel} settings={settings} setSettings={setSettings} />}
           {panel === "port" && <PortModal key={portTab} engine={engine} cloud={cloud} initialTab={portTab} mapOnly={!engine.s.atPort && portTab === "map"} onClose={closePanel} onTravel={requestTrip} onRest={startRest} onReset={reset} />}
           {letter !== null && <LetterModal engine={engine} index={letter} onClose={() => { audio.ui("paper"); setLetter(null); }} />}
