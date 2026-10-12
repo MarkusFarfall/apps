@@ -1,0 +1,8 @@
+
+# добавлено при выделении из монорепозитория apps (корневой .gitignore)
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+*.swp
+*~
